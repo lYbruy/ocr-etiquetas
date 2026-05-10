@@ -552,3 +552,21 @@ body::before {
   border-radius: var(--radius-sm);
   padding: 10px 14px;
 }
+
+.lote-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.lote-info strong {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 16px;
+}
