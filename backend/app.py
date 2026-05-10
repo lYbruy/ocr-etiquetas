@@ -50,7 +50,7 @@ def get_ocr():
 
         ocr = PaddleOCR(
             use_angle_cls=True,
-            lang="latin"
+            lang="en"
         )
 
         print("PaddleOCR inicializado", flush=True)
