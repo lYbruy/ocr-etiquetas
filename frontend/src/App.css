@@ -430,3 +430,77 @@ body::before {
   color: var(--accent);
   border-color: rgba(16, 185, 129, 0.3);
 }
+
+.edit-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.edit-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.edit-input {
+  width: 100%;
+  padding: 13px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-1);
+  font-family: var(--font-ui);
+  font-size: 15px;
+  outline: none;
+}
+
+.edit-input:focus {
+  border-color: rgba(16, 185, 129, 0.45);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+}
+
+.edit-input.mono {
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+}
+
+.candidatos {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.candidate {
+  text-align: left;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-1);
+  font-family: var(--font-ui);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.candidate:hover {
+  border-color: rgba(16, 185, 129, 0.35);
+  background: rgba(16, 185, 129, 0.08);
+}
+
+.candidate span {
+  font-size: 14px;
+}
+
+.candidate strong {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--accent);
+}
