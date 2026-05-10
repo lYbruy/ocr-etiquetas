@@ -7,9 +7,11 @@ export default function App() {
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
   const detectorCanvasRef = useRef(null)
+
   const autoTimerRef = useRef(null)
   const stableCountRef = useRef(0)
   const capturandoRef = useRef(false)
+  const streamRef = useRef(null)
 
   const [foto, setFoto] = useState(null)
   const [resultado, setResultado] = useState(null)
@@ -17,14 +19,12 @@ export default function App() {
   const [erro, setErro] = useState(null)
   const [autoStatus, setAutoStatus] = useState('Aponte para a etiqueta')
   const [exportado, setExportado] = useState(false)
-  const [totalExportado, setTotalExportado] = useState(0)
 
   const [moradaEdit, setMoradaEdit] = useState('')
   const [codigoEdit, setCodigoEdit] = useState('')
   const [cidadeEdit, setCidadeEdit] = useState('')
 
   useEffect(() => {
-    buscarTotal()
     iniciarCamera()
 
     return () => {
@@ -33,74 +33,68 @@ export default function App() {
     }
   }, [])
 
-  async function buscarTotal() {
+  async function iniciarCamera() {
     try {
-      const response = await fetch(`${API}/total-exportados`)
-      const data = await response.json()
+      setErro(null)
+      setAutoStatus('A abrir câmara...')
 
-      setTotalExportado(data?.total || 0)
+      pararAutoDetector()
+      pararCamera()
+
+      capturandoRef.current = false
+      stableCountRef.current = 0
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: 'environment',
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+        },
+        audio: false,
+      })
+
+      streamRef.current = stream
+
+      const video = videoRef.current
+
+      if (!video) {
+        throw new Error('Elemento de vídeo não encontrado.')
+      }
+
+      video.srcObject = stream
+
+      await new Promise((resolve) => {
+        video.onloadedmetadata = () => resolve()
+      })
+
+      await video.play()
+
+      setAutoStatus('Aponte para a etiqueta')
+
+      setTimeout(() => {
+        iniciarAutoDetector()
+      }, 700)
+
     } catch (e) {
       console.error(e)
+      setErro('Não foi possível aceder à câmara.')
+      setAutoStatus('Erro ao abrir câmara')
     }
   }
-
-  async function iniciarCamera() {
-  try {
-    setErro(null)
-    setAutoStatus('A abrir câmara...')
-
-    pararAutoDetector()
-    pararCamera()
-
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: 'environment',
-        width: { ideal: 1920 },
-        height: { ideal: 1080 },
-      },
-    })
-
-    const video = videoRef.current
-
-    if (!video) {
-      throw new Error('Vídeo não encontrado.')
-    }
-
-    video.srcObject = stream
-
-    await new Promise((resolve) => {
-      video.onloadedmetadata = () => {
-        resolve()
-      }
-    })
-
-    await video.play()
-
-    capturandoRef.current = false
-    stableCountRef.current = 0
-
-    setAutoStatus('Aponte para a etiqueta')
-
-    setTimeout(() => {
-      iniciarAutoDetector()
-    }, 700)
-
-  } catch (e) {
-    console.error(e)
-    setErro('Não foi possível aceder à câmara.')
-    setAutoStatus('Erro ao abrir câmara')
-  }
-}
 
   function pararCamera() {
     try {
+      pararAutoDetector()
+
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop())
+        streamRef.current = null
+      }
+
       const video = videoRef.current
 
-      if (video && video.srcObject) {
-        video.srcObject
-          .getTracks()
-          .forEach(track => track.stop())
-
+      if (video) {
+        video.pause()
         video.srcObject = null
       }
     } catch (e) {
@@ -110,6 +104,12 @@ export default function App() {
 
   function iniciarAutoDetector() {
     pararAutoDetector()
+
+    if (foto || loading || resultado) {
+      return
+    }
+
+    stableCountRef.current = 0
 
     autoTimerRef.current = setInterval(() => {
       detectarEtiquetaECapturar()
@@ -129,13 +129,10 @@ export default function App() {
     const video = videoRef.current
     const canvas = detectorCanvasRef.current
 
-    if (!video || !canvas || foto || loading || capturandoRef.current) {
-      return
-    }
-
-    if (!video.videoWidth || !video.videoHeight) {
-      return
-    }
+    if (!video || !canvas) return
+    if (foto || loading || resultado) return
+    if (capturandoRef.current) return
+    if (!video.videoWidth || !video.videoHeight) return
 
     const width = 240
     const height = 160
@@ -169,8 +166,8 @@ export default function App() {
 
         const lum = (r + g + b) / 3
 
-        if (lum > 175) bright++
-        if (lum < 80) dark++
+        if (lum > 170) bright++
+        if (lum < 90) dark++
 
         total++
       }
@@ -180,9 +177,9 @@ export default function App() {
     const darkRatio = dark / total
 
     const pareceEtiqueta =
-      brightRatio > 0.28 &&
-      brightRatio < 0.88 &&
-      darkRatio > 0.015
+      brightRatio > 0.25 &&
+      brightRatio < 0.9 &&
+      darkRatio > 0.012
 
     if (pareceEtiqueta) {
       stableCountRef.current += 1
@@ -200,9 +197,13 @@ export default function App() {
   }
 
   async function tirarFoto(auto = false) {
-    pararAutoDetector()
-    capturandoRef.current = true
+    if (capturandoRef.current && !auto) {
+      return
+    }
 
+    pararAutoDetector()
+
+    capturandoRef.current = true
     setLoading(true)
     setErro(null)
     setResultado(null)
@@ -233,10 +234,7 @@ export default function App() {
         canvas.height
       )
 
-      const imageData = canvas.toDataURL(
-        'image/jpeg',
-        1
-      )
+      const imageData = canvas.toDataURL('image/jpeg', 1)
 
       setFoto(imageData)
       setAutoStatus(auto ? 'Foto capturada automaticamente' : 'Foto capturada')
@@ -245,30 +243,25 @@ export default function App() {
 
       canvas.toBlob(async (blob) => {
         if (!blob) {
-          setErro('Erro ao gerar imagem.')
-          setLoading(false)
-          capturandoRef.current = false
-          return
+          throw new Error('Erro ao gerar imagem.')
         }
 
         const form = new FormData()
 
-        form.append(
-          'file',
-          blob,
-          'foto.jpg'
-        )
+        form.append('file', blob, 'foto.jpg')
 
         try {
-          const response = await fetch(
-            `${API}/upload`,
-            {
-              method: 'POST',
-              body: form,
-            }
-          )
+          console.log('Enviando imagem para API...')
+
+          const response = await fetch(`${API}/upload`, {
+            method: 'POST',
+            body: form,
+          })
 
           const data = await response.json().catch(() => null)
+
+          console.log('STATUS:', response.status)
+          console.log('RESPOSTA:', data)
 
           if (!response.ok) {
             throw new Error(data?.erro || `Erro HTTP ${response.status}`)
@@ -297,12 +290,10 @@ export default function App() {
               ? data.cidade
               : ''
           )
+
         } catch (e) {
           console.error(e)
-
-          setErro(
-            e.message || 'Falha ao processar a etiqueta.'
-          )
+          setErro(e.message || 'Falha ao processar a etiqueta.')
         } finally {
           setLoading(false)
           capturandoRef.current = false
@@ -311,23 +302,13 @@ export default function App() {
 
     } catch (e) {
       console.error(e)
-
-      setErro(
-        e.message || 'Erro ao tirar foto.'
-      )
-
+      setErro(e.message || 'Erro ao tirar foto.')
       setLoading(false)
       capturandoRef.current = false
-
-      if (!foto) {
-        setTimeout(() => {
-          iniciarCamera()
-        }, 500)
-      }
     }
   }
 
-  async function confirmarAdicionarAoLote() {
+  async function confirmarExportar() {
     try {
       setErro(null)
       setLoading(true)
@@ -357,80 +338,44 @@ export default function App() {
       }
 
       setExportado(true)
-      await buscarTotal()
     } catch (e) {
       console.error(e)
-      setErro(e.message || 'Erro ao adicionar ao lote.')
+      setErro(e.message || 'Erro ao confirmar/exportar.')
     } finally {
       setLoading(false)
     }
   }
 
-async function novaFoto() {
-  pararAutoDetector()
-  pararCamera()
+  async function proximaEtiqueta() {
+    setFoto(null)
+    setResultado(null)
+    setErro(null)
+    setLoading(false)
+    setExportado(false)
+    setMoradaEdit('')
+    setCodigoEdit('')
+    setCidadeEdit('')
 
-  setFoto(null)
-  setResultado(null)
-  setErro(null)
-  setLoading(false)
-  setExportado(false)
-  setMoradaEdit('')
-  setCodigoEdit('')
-  setCidadeEdit('')
+    capturandoRef.current = false
+    stableCountRef.current = 0
 
-  capturandoRef.current = false
-  stableCountRef.current = 0
+    await iniciarCamera()
+  }
 
-  setAutoStatus('A reiniciar câmara...')
+  async function novaTentativa() {
+    setFoto(null)
+    setResultado(null)
+    setErro(null)
+    setLoading(false)
+    setExportado(false)
+    setMoradaEdit('')
+    setCodigoEdit('')
+    setCidadeEdit('')
 
-  setTimeout(() => {
-    iniciarCamera()
-  }, 400)
-}
+    capturandoRef.current = false
+    stableCountRef.current = 0
 
-  async function limparLote() {
-    const confirmar = window.confirm(
-      'Tem certeza que quer limpar o lote atual? Isto apaga o Excel/CSV atual.'
-    )
-
-    if (!confirmar) {
-      return
-    }
-
-    try {
-      setErro(null)
-      setLoading(true)
-
-      const response = await fetch(`${API}/limpar-lote`, {
-        method: 'POST',
-      })
-
-      const data = await response.json().catch(() => null)
-
-      if (!response.ok) {
-        throw new Error(data?.erro || `Erro HTTP ${response.status}`)
-      }
-
-      if (data?.erro) {
-        throw new Error(data.erro)
-      }
-
-      setTotalExportado(0)
-      setFoto(null)
-      setResultado(null)
-      setExportado(false)
-      setMoradaEdit('')
-      setCodigoEdit('')
-      setCidadeEdit('')
-
-      await iniciarCamera()
-    } catch (e) {
-      console.error(e)
-      setErro(e.message || 'Erro ao limpar lote.')
-    } finally {
-      setLoading(false)
-    }
+    await iniciarCamera()
   }
 
   const resultados = resultado?.todos_resultados || []
@@ -498,24 +443,10 @@ async function novaFoto() {
           </h1>
 
           <span className="badge">
-            {totalExportado} no lote
+            v1.2
           </span>
 
         </header>
-
-        <div className="batch-panel">
-          <span>
-            Etiquetas confirmadas: <strong>{totalExportado}</strong>
-          </span>
-
-          <button
-            className="btn-mini-danger"
-            onClick={limparLote}
-            disabled={loading}
-          >
-            Limpar lote
-          </button>
-        </div>
 
         <div className="viewport">
 
@@ -609,9 +540,9 @@ async function novaFoto() {
 
           <button
             className="btn-secondary"
-            onClick={novaFoto}
+            onClick={novaTentativa}
           >
-            Nova Foto
+            Tentar Novamente
           </button>
 
         )}
@@ -704,30 +635,13 @@ async function novaFoto() {
 
             <button
               className="btn-primary"
-              onClick={confirmarAdicionarAoLote}
+              onClick={confirmarExportar}
               disabled={loading || exportado}
             >
-              {exportado ? 'Adicionado ao lote' : 'Confirmar e Adicionar ao Lote'}
+              {exportado ? 'Guardado na lista' : 'Confirmar e Guardar'}
             </button>
 
             {exportado && (
-
-              <>
-                <p className="success-message">
-                  Etiqueta guardada. Pode tirar outra foto ou exportar tudo.
-                </p>
-
-                <button
-                  className="btn-secondary"
-                  onClick={novaFoto}
-                >
-                  Tirar Próxima Etiqueta
-                </button>
-              </>
-
-            )}
-
-            {totalExportado > 0 && (
 
               <div className="actions">
 
@@ -737,7 +651,7 @@ async function novaFoto() {
                   rel="noreferrer"
                   className="btn-download"
                 >
-                  Exportar Excel
+                  Excel
                 </a>
 
                 <a
@@ -746,23 +660,19 @@ async function novaFoto() {
                   rel="noreferrer"
                   className="btn-download"
                 >
-                  Exportar CSV
+                  CSV
                 </a>
 
               </div>
 
             )}
 
-            {!exportado && (
-
-              <button
-                className="btn-secondary"
-                onClick={novaFoto}
-              >
-                Nova Foto
-              </button>
-
-            )}
+            <button
+              className="btn-secondary"
+              onClick={proximaEtiqueta}
+            >
+              Ler Próxima Etiqueta
+            </button>
 
           </div>
 
