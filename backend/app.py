@@ -8,7 +8,14 @@ import pandas as pd
 import os
 import uuid
 import re
-import easyocr
+import pytesseract
+
+# =========================
+# TESSERACT
+# =========================
+
+if os.name == "nt":
+    pytesseract.pytesseract.tesseract_cmd = r"C:\Programas\Tesseract-OCR\tesseract.exe"
 
 # =========================
 # FASTAPI
@@ -24,33 +31,19 @@ app.add_middleware(
 )
 
 # =========================
-# OCR
-# =========================
-
-reader = easyocr.Reader(
-    ['pt', 'en'],
-    gpu=False
-)
-
-# =========================
 # PASTAS
 # =========================
 
-os.makedirs(
-    "uploads",
-    exist_ok=True
-)
-
-os.makedirs(
-    "exports",
-    exist_ok=True
-)
+os.makedirs("uploads", exist_ok=True)
+os.makedirs("exports", exist_ok=True)
 
 # =========================
 # LIMPAR TEXTO
 # =========================
 
 def limpar_texto(texto):
+
+    texto = texto.replace("\n", " ")
 
     lixo = [
         "REEN",
@@ -59,20 +52,69 @@ def limpar_texto(texto):
         "TIPO",
         "COD",
         "BUL",
-        "EXP",
-        "PA",
-        "PEF",
         "YPO",
+        "PEF",
+        "EXP",
+        "FECHA",
+        "|",
+        ":",
+        ";"
     ]
 
     for l in lixo:
-
-        texto = texto.replace(
-            l,
-            ""
-        )
+        texto = texto.replace(l, "")
 
     return texto.strip()
+
+# =========================
+# EXTRAIR CÓDIGO POSTAL
+# =========================
+
+def extrair_codigo_postal(texto):
+
+    match = re.search(r"\d{4}-\d{3}", texto)
+
+    if match:
+        return match.group()
+
+    match = re.search(r"\d{4}\s?\d{3}", texto)
+
+    if match:
+
+        codigo = match.group()
+
+        codigo = codigo.replace(
+            " ",
+            "-"
+        )
+
+        return codigo
+
+    return ""
+
+# =========================
+# EXTRAIR MORADA
+# =========================
+
+def extrair_morada(texto):
+
+    linhas = texto.split("\n")
+
+    for linha in linhas:
+
+        linha = linha.strip()
+
+        if (
+            "RUA" in linha.upper()
+            or "AVENIDA" in linha.upper()
+            or "ALAMEDA" in linha.upper()
+            or "TRAVESSA" in linha.upper()
+            or "ESTRADA" in linha.upper()
+        ):
+
+            return linha
+
+    return ""
 
 # =========================
 # UPLOAD
@@ -81,349 +123,158 @@ def limpar_texto(texto):
 @app.post("/upload")
 async def upload(file: UploadFile = File(...)):
 
-    # =========================
-    # SALVAR FOTO
-    # =========================
+    try:
 
-    nome = f"{uuid.uuid4()}.jpg"
+        # =========================
+        # SALVAR FOTO
+        # =========================
 
-    caminho = f"uploads/{nome}"
+        nome = f"{uuid.uuid4()}.jpg"
 
-    with open(caminho, "wb") as buffer:
+        caminho = f"uploads/{nome}"
 
-        shutil.copyfileobj(
-            file.file,
-            buffer
+        with open(caminho, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        # =========================
+        # ABRIR IMAGEM
+        # =========================
+
+        img = cv2.imread(caminho)
+
+        if img is None:
+
+            return {
+                "erro": "Erro ao abrir imagem"
+            }
+
+        # =========================
+        # REDIMENSIONAR
+        # =========================
+
+        img = cv2.resize(
+            img,
+            None,
+            fx=2,
+            fy=2,
+            interpolation=cv2.INTER_CUBIC
         )
 
-    # =========================
-    # LER IMAGEM
-    # =========================
+        # =========================
+        # PROCESSAR IMAGEM
+        # =========================
 
-    img = cv2.imread(caminho)
+        gray = cv2.cvtColor(
+            img,
+            cv2.COLOR_BGR2GRAY
+        )
 
-    if img is None:
+        gray = cv2.GaussianBlur(
+            gray,
+            (3, 3),
+            0
+        )
 
-        return {
-            "erro": "Erro ao abrir imagem"
-        }
+        gray = cv2.threshold(
+            gray,
+            0,
+            255,
+            cv2.THRESH_BINARY + cv2.THRESH_OTSU
+        )[1]
 
-    # =========================
-    # AUMENTAR RESOLUÇÃO
-    # =========================
+        # =========================
+        # OCR
+        # =========================
 
-    img = cv2.resize(
-        img,
-        None,
-        fx=3,
-        fy=3,
-        interpolation=cv2.INTER_CUBIC
-    )
+        texto = pytesseract.image_to_string(
+            gray,
+            lang='eng'
+        )
 
-    # =========================
-    # CORTAR ÁREA CENTRAL
-    # =========================
+        texto = limpar_texto(texto)
 
-    altura, largura = img.shape[:2]
+        print("\n========== OCR ==========\n")
+        print(texto)
 
-    x1 = int(largura * 0.08)
-    y1 = int(altura * 0.10)
+        # =========================
+        # EXTRAIR DADOS
+        # =========================
 
-    x2 = int(largura * 0.92)
-    y2 = int(altura * 0.75)
+        codigo_postal = extrair_codigo_postal(texto)
 
-    crop = img[y1:y2, x1:x2]
+        morada = extrair_morada(texto)
 
-    cv2.imwrite(
-        "crop.jpg",
-        crop
-    )
+        # =========================
+        # FALLBACK
+        # =========================
 
-    img = crop
+        if not codigo_postal:
 
-    # =========================
-    # MELHORAR IMAGEM
-    # =========================
+            if "3800" in texto:
+                codigo_postal = "3800"
 
-    gray = cv2.cvtColor(
-        img,
-        cv2.COLOR_BGR2GRAY
-    )
+        # =========================
+        # DATAFRAME
+        # =========================
 
-    gray = cv2.GaussianBlur(
-        gray,
-        (3,3),
-        0
-    )
+        dados = pd.DataFrame([{
+            "Morada": morada,
+            "Código Postal": codigo_postal
+        }])
 
-    gray = cv2.convertScaleAbs(
-        gray,
-        alpha=1.8,
-        beta=25
-    )
+        arquivo_excel = "exports/resultado.xlsx"
 
-    gray = cv2.threshold(
-        gray,
-        0,
-        255,
-        cv2.THRESH_BINARY + cv2.THRESH_OTSU
-    )[1]
+        # =========================
+        # CONCATENAR
+        # =========================
 
-    cv2.imwrite(
-        "temp.jpg",
-        gray
-    )
+        if os.path.exists(arquivo_excel):
 
-    # =========================
-    # OCR
-    # =========================
-
-    resultado = reader.readtext(
-        "temp.jpg",
-        detail=1,
-        paragraph=False
-    )
-
-    texto = ""
-
-    palavras_detectadas = []
-
-    for item in resultado:
-
-        try:
-
-            caixa = item[0]
-            txt = item[1]
-            confianca = item[2]
-
-            if confianca > 0.20:
-
-                texto += txt + "\n"
-
-                y = int(caixa[0][1])
-
-                palavras_detectadas.append({
-                    "texto": txt,
-                    "y": y
-                })
-
-        except:
-            pass
-
-    print("\n========== OCR ==========\n")
-    print(texto)
-
-    # =========================
-    # ORGANIZAR LINHAS
-    # =========================
-
-    palavras_detectadas = sorted(
-        palavras_detectadas,
-        key=lambda x: x["y"]
-    )
-
-    linhas_ocr = []
-
-    linha_atual = []
-
-    ultimo_y = None
-
-    for item in palavras_detectadas:
-
-        y = item["y"]
-
-        if ultimo_y is None:
-
-            linha_atual.append(
-                item["texto"]
+            antigo = pd.read_excel(
+                arquivo_excel
             )
 
-        elif abs(y - ultimo_y) < 35:
-
-            linha_atual.append(
-                item["texto"]
+            final = pd.concat(
+                [antigo, dados],
+                ignore_index=True
             )
 
         else:
 
-            linhas_ocr.append(
-                " ".join(linha_atual)
-            )
+            final = dados
 
-            linha_atual = [
-                item["texto"]
-            ]
+        # =========================
+        # SALVAR
+        # =========================
 
-        ultimo_y = y
-
-    if linha_atual:
-
-        linhas_ocr.append(
-            " ".join(linha_atual)
+        final.to_excel(
+            arquivo_excel,
+            index=False
         )
 
-    print("\n========== LINHAS ==========\n")
-
-    for l in linhas_ocr:
-        print(l)
-
-    # =========================
-    # TEXTO FINAL
-    # =========================
-
-    texto_final = limpar_texto(
-        " ".join(linhas_ocr)
-    )
-
-    print("\n========== TEXTO FINAL ==========\n")
-    print(texto_final)
-
-    # =========================
-    # EXTRAIR CÓDIGO POSTAL
-    # =========================
-
-    codigo_postal = ""
-
-    possiveis_codigos = re.findall(
-        r'\d{4}\-?\d{3}',
-        texto_final
-    )
-
-    if len(possiveis_codigos) > 0:
-
-        codigo_postal = possiveis_codigos[-1]
-
-        codigo_postal = codigo_postal.replace(
-            " ",
-            ""
+        final.to_csv(
+            "exports/resultado.csv",
+            index=False
         )
 
-        # corrigir OCR comum
+        # =========================
+        # RESPOSTA
+        # =========================
 
-        codigo_postal = codigo_postal.replace(
-            "3866",
-            "3800"
-        )
+        return {
+            "morada": morada,
+            "codigo_postal": codigo_postal,
+            "texto_ocr": texto
+        }
 
-        codigo_postal = codigo_postal.replace(
-            "2800",
-            "3800"
-        )
+    except Exception as e:
 
-    # =========================
-    # EXTRAIR MORADA
-    # =========================
+        print("\n========== ERRO ==========\n")
+        print(str(e))
 
-    morada = ""
-
-    padroes = [
-
-        r'Rua\s+[A-Za-zÀ-ÿ0-9\s\-]+',
-        r'Ruo\s+[A-Za-zÀ-ÿ0-9\s\-]+',
-        r'Avenida\s+[A-Za-zÀ-ÿ0-9\s\-]+',
-        r'Alameda\s+[A-Za-zÀ-ÿ0-9\s\-]+',
-        r'Estrada\s+[A-Za-zÀ-ÿ0-9\s\-]+',
-        r'Travessa\s+[A-Za-zÀ-ÿ0-9\s\-]+',
-
-    ]
-
-    for padrao in padroes:
-
-        match = re.search(
-            padrao,
-            texto_final,
-            re.IGNORECASE
-        )
-
-        if match:
-
-            morada = match.group()
-
-            break
-
-    # =========================
-    # CORRIGIR OCR
-    # =========================
-
-    morada = morada.replace(
-        "Ruo",
-        "Rua"
-    )
-
-    morada = morada.replace(
-        "Aaneda",
-        "Alameda"
-    )
-
-    morada = morada.replace(
-        "lva",
-        "Silva"
-    )
-
-    morada = morada.replace(
-        "AveIRO",
-        "AVEIRO"
-    )
-
-    morada = morada.replace(
-        "51",
-        "Silva"
-    )
-
-    morada = morada.strip()
-
-    # =========================
-    # DATAFRAME
-    # =========================
-
-    dados = pd.DataFrame([{
-        "Morada": morada,
-        "Código Postal": codigo_postal
-    }])
-
-    arquivo_excel = "exports/resultado.xlsx"
-
-    if os.path.exists(
-        arquivo_excel
-    ):
-
-        antigo = pd.read_excel(
-            arquivo_excel
-        )
-
-        final = pd.concat(
-            [antigo, dados],
-            ignore_index=True
-        )
-
-    else:
-
-        final = dados
-
-    # =========================
-    # SALVAR
-    # =========================
-
-    final.to_excel(
-        arquivo_excel,
-        index=False
-    )
-
-    final.to_csv(
-        "exports/resultado.csv",
-        index=False
-    )
-
-    # =========================
-    # RESPOSTA
-    # =========================
-
-    return {
-        "morada": morada,
-        "codigo_postal": codigo_postal,
-        "texto_ocr": texto_final,
-        "linhas": linhas_ocr
-    }
+        return {
+            "erro": str(e)
+        }
 
 # =========================
 # DOWNLOAD EXCEL
