@@ -4,7 +4,6 @@ import './App.css'
 const API = 'https://ocr-etiquetas-production.up.railway.app'
 
 export default function App() {
-
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
 
@@ -18,59 +17,55 @@ export default function App() {
   }, [])
 
   async function iniciarCamera() {
-
     try {
-
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: 'environment',
           width: { ideal: 1920 },
-          height: { ideal: 1080 }
-        }
+          height: { ideal: 1080 },
+        },
       })
 
       videoRef.current.srcObject = stream
-
-    } catch {
-
+    } catch (e) {
       setErro('Não foi possível aceder à câmara.')
-
     }
-
   }
 
   async function tirarFoto() {
-
     setLoading(true)
     setErro(null)
 
-    const video = videoRef.current
-    const canvas = canvasRef.current
+    try {
+      const video = videoRef.current
+      const canvas = canvasRef.current
 
-    canvas.width = video.videoWidth
-    canvas.height = video.videoHeight
+      canvas.width = video.videoWidth
+      canvas.height = video.videoHeight
 
-    const ctx = canvas.getContext('2d')
+      const ctx = canvas.getContext('2d')
 
-    ctx.drawImage(
-      video,
-      0,
-      0,
-      canvas.width,
-      canvas.height
-    )
+      ctx.drawImage(
+        video,
+        0,
+        0,
+        canvas.width,
+        canvas.height
+      )
 
-    setFoto(
-      canvas.toDataURL('image/jpeg')
-    )
+      const imageData = canvas.toDataURL(
+        'image/jpeg',
+        1
+      )
 
-    video.srcObject
-      .getTracks()
-      .forEach(track => track.stop())
+      setFoto(imageData)
 
-    canvas.toBlob(async (blob) => {
+      // parar câmera
+      video.srcObject
+        .getTracks()
+        .forEach(track => track.stop())
 
-      try {
+      canvas.toBlob(async (blob) => {
 
         const form = new FormData()
 
@@ -80,52 +75,57 @@ export default function App() {
           'foto.jpg'
         )
 
-        const res = await fetch(
-          `${API}/upload`,
-          {
-            method: 'POST',
-            body: form
+        try {
+
+          const response = await fetch(
+            `${API}/upload`,
+            {
+              method: 'POST',
+              body: form,
+            }
+          )
+
+          if (!response.ok) {
+            throw new Error()
           }
-        )
 
-        if (!res.ok) {
+          const data = await response.json()
 
-          throw new Error()
+          setResultado(data)
+
+        } catch {
+
+          setErro(
+            'Falha ao processar a etiqueta.'
+          )
+
+        } finally {
+
+          setLoading(false)
 
         }
 
-        const data = await res.json()
+      }, 'image/jpeg', 1)
 
-        setResultado(data)
+    } catch {
 
-      } catch {
+      setErro(
+        'Erro ao tirar foto.'
+      )
 
-        setErro(
-          'Falha ao processar a etiqueta.'
-        )
-
-      } finally {
-
-        setLoading(false)
-
-      }
-
-    }, 'image/jpeg', 1)
-
+      setLoading(false)
+    }
   }
 
   async function novaFoto() {
-
     setFoto(null)
     setResultado(null)
     setErro(null)
 
     await iniciarCamera()
-
   }
 
   return (
-
     <div className="root">
 
       <div className="card">
@@ -134,16 +134,51 @@ export default function App() {
 
           <div className="logo-mark">
 
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 20 20"
+              fill="none"
+            >
+              <rect
+                x="1"
+                y="1"
+                width="6"
+                height="6"
+                rx="1"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              />
 
-              <rect x="1" y="1" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.5"/>
+              <rect
+                x="13"
+                y="1"
+                width="6"
+                height="6"
+                rx="1"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              />
 
-              <rect x="13" y="1" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.5"/>
+              <rect
+                x="1"
+                y="13"
+                width="6"
+                height="6"
+                rx="1"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              />
 
-              <rect x="1" y="13" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.5"/>
-
-              <rect x="13" y="13" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.5"/>
-
+              <rect
+                x="13"
+                y="13"
+                width="6"
+                height="6"
+                rx="1"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              />
             </svg>
 
           </div>
@@ -181,7 +216,7 @@ export default function App() {
               </div>
 
               <p className="hint">
-                Enquadre a etiqueta
+                Enquadre a etiqueta na área marcada
               </p>
 
             </div>
@@ -193,6 +228,7 @@ export default function App() {
               <img
                 src={foto}
                 className="preview"
+                alt="Foto"
               />
 
               {loading && (
@@ -215,14 +251,15 @@ export default function App() {
 
         </div>
 
-        <canvas ref={canvasRef} hidden />
+        <canvas
+          ref={canvasRef}
+          hidden
+        />
 
         {erro && (
-
           <p className="erro">
             {erro}
           </p>
-
         )}
 
         {!foto && (
@@ -230,6 +267,7 @@ export default function App() {
           <button
             className="btn-primary"
             onClick={tirarFoto}
+            disabled={loading}
           >
 
             Tirar Foto
@@ -241,6 +279,18 @@ export default function App() {
         {resultado && !loading && (
 
           <div className="resultado">
+
+            <div className="resultado-header">
+
+              <span className="resultado-status">
+
+                <span className="dot" />
+
+                Leitura concluída
+
+              </span>
+
+            </div>
 
             <div className="fields">
 
@@ -278,9 +328,7 @@ export default function App() {
                 rel="noreferrer"
                 className="btn-download"
               >
-
                 Excel
-
               </a>
 
               <a
@@ -289,9 +337,7 @@ export default function App() {
                 rel="noreferrer"
                 className="btn-download"
               >
-
                 CSV
-
               </a>
 
             </div>
@@ -300,9 +346,7 @@ export default function App() {
               className="btn-secondary"
               onClick={novaFoto}
             >
-
               Nova Foto
-
             </button>
 
           </div>
@@ -312,7 +356,5 @@ export default function App() {
       </div>
 
     </div>
-
   )
-
 }

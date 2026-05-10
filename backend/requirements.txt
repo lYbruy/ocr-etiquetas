@@ -4,9 +4,6 @@ python-multipart
 opencv-python-headless
 numpy==1.26.4
 pandas
-easyocr
-torch
-torchvision
 openpyxl
 pytesseract
 Pillow
