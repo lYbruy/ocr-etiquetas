@@ -1005,3 +1005,59 @@ async def download_csv():
         path=arquivo_csv,
         filename="resultado.csv"
     )
+
+    # =========================
+# TOTAL EXPORTADO
+# =========================
+
+@app.get("/total-exportados")
+async def total_exportados():
+
+    arquivo_excel = "exports/resultado.xlsx"
+
+    if not os.path.exists(arquivo_excel):
+        return {
+            "total": 0
+        }
+
+    try:
+        df = pd.read_excel(arquivo_excel)
+
+        return {
+            "total": len(df)
+        }
+
+    except Exception:
+        return {
+            "total": 0
+        }
+
+
+# =========================
+# LIMPAR LOTE
+# =========================
+
+@app.post("/limpar-lote")
+async def limpar_lote():
+
+    try:
+        arquivo_excel = "exports/resultado.xlsx"
+        arquivo_csv = "exports/resultado.csv"
+
+        if os.path.exists(arquivo_excel):
+            os.remove(arquivo_excel)
+
+        if os.path.exists(arquivo_csv):
+            os.remove(arquivo_csv)
+
+        uploads_pendentes.clear()
+
+        return {
+            "status": "lote_limpo",
+            "total": 0
+        }
+
+    except Exception as e:
+        return {
+            "erro": str(e)
+        }

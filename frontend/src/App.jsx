@@ -17,12 +17,14 @@ export default function App() {
   const [erro, setErro] = useState(null)
   const [autoStatus, setAutoStatus] = useState('Aponte para a etiqueta')
   const [exportado, setExportado] = useState(false)
+  const [totalExportado, setTotalExportado] = useState(0)
 
   const [moradaEdit, setMoradaEdit] = useState('')
   const [codigoEdit, setCodigoEdit] = useState('')
   const [cidadeEdit, setCidadeEdit] = useState('')
 
   useEffect(() => {
+    buscarTotal()
     iniciarCamera()
 
     return () => {
@@ -30,6 +32,17 @@ export default function App() {
       pararCamera()
     }
   }, [])
+
+  async function buscarTotal() {
+    try {
+      const response = await fetch(`${API}/total-exportados`)
+      const data = await response.json()
+
+      setTotalExportado(data?.total || 0)
+    } catch (e) {
+      console.error(e)
+    }
+  }
 
   async function iniciarCamera() {
     try {
@@ -223,8 +236,6 @@ export default function App() {
         )
 
         try {
-          console.log('Enviando imagem para API...')
-
           const response = await fetch(
             `${API}/upload`,
             {
@@ -235,9 +246,6 @@ export default function App() {
 
           const data = await response.json().catch(() => null)
 
-          console.log('STATUS:', response.status)
-          console.log('RESPOSTA:', data)
-
           if (!response.ok) {
             throw new Error(data?.erro || `Erro HTTP ${response.status}`)
           }
@@ -247,9 +255,24 @@ export default function App() {
           }
 
           setResultado(data)
-          setMoradaEdit(data?.morada && data.morada !== 'Não encontrada' ? data.morada : '')
-          setCodigoEdit(data?.codigo_postal && data.codigo_postal !== 'Não encontrado' ? data.codigo_postal : '')
-          setCidadeEdit(data?.cidade && data.cidade !== 'Não encontrada' ? data.cidade : '')
+
+          setMoradaEdit(
+            data?.morada && data.morada !== 'Não encontrada'
+              ? data.morada
+              : ''
+          )
+
+          setCodigoEdit(
+            data?.codigo_postal && data.codigo_postal !== 'Não encontrado'
+              ? data.codigo_postal
+              : ''
+          )
+
+          setCidadeEdit(
+            data?.cidade && data.cidade !== 'Não encontrada'
+              ? data.cidade
+              : ''
+          )
         } catch (e) {
           console.error(e)
 
@@ -274,7 +297,7 @@ export default function App() {
     }
   }
 
-  async function confirmarExportar() {
+  async function confirmarAdicionarAoLote() {
     try {
       setErro(null)
       setLoading(true)
@@ -304,9 +327,10 @@ export default function App() {
       }
 
       setExportado(true)
+      await buscarTotal()
     } catch (e) {
       console.error(e)
-      setErro(e.message || 'Erro ao confirmar/exportar.')
+      setErro(e.message || 'Erro ao adicionar ao lote.')
     } finally {
       setLoading(false)
     }
@@ -325,6 +349,50 @@ export default function App() {
     stableCountRef.current = 0
 
     await iniciarCamera()
+  }
+
+  async function limparLote() {
+    const confirmar = window.confirm(
+      'Tem certeza que quer limpar o lote atual? Isto apaga o Excel/CSV atual.'
+    )
+
+    if (!confirmar) {
+      return
+    }
+
+    try {
+      setErro(null)
+      setLoading(true)
+
+      const response = await fetch(`${API}/limpar-lote`, {
+        method: 'POST',
+      })
+
+      const data = await response.json().catch(() => null)
+
+      if (!response.ok) {
+        throw new Error(data?.erro || `Erro HTTP ${response.status}`)
+      }
+
+      if (data?.erro) {
+        throw new Error(data.erro)
+      }
+
+      setTotalExportado(0)
+      setFoto(null)
+      setResultado(null)
+      setExportado(false)
+      setMoradaEdit('')
+      setCodigoEdit('')
+      setCidadeEdit('')
+
+      await iniciarCamera()
+    } catch (e) {
+      console.error(e)
+      setErro(e.message || 'Erro ao limpar lote.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   const resultados = resultado?.todos_resultados || []
@@ -392,10 +460,24 @@ export default function App() {
           </h1>
 
           <span className="badge">
-            v1.1
+            {totalExportado} no lote
           </span>
 
         </header>
+
+        <div className="batch-panel">
+          <span>
+            Etiquetas confirmadas: <strong>{totalExportado}</strong>
+          </span>
+
+          <button
+            className="btn-mini-danger"
+            onClick={limparLote}
+            disabled={loading}
+          >
+            Limpar lote
+          </button>
+        </div>
 
         <div className="viewport">
 
@@ -584,13 +666,30 @@ export default function App() {
 
             <button
               className="btn-primary"
-              onClick={confirmarExportar}
+              onClick={confirmarAdicionarAoLote}
               disabled={loading || exportado}
             >
-              {exportado ? 'Exportado com sucesso' : 'Confirmar e Exportar'}
+              {exportado ? 'Adicionado ao lote' : 'Confirmar e Adicionar ao Lote'}
             </button>
 
             {exportado && (
+
+              <>
+                <p className="success-message">
+                  Etiqueta guardada. Pode tirar outra foto ou exportar tudo.
+                </p>
+
+                <button
+                  className="btn-secondary"
+                  onClick={novaFoto}
+                >
+                  Tirar Próxima Etiqueta
+                </button>
+              </>
+
+            )}
+
+            {totalExportado > 0 && (
 
               <div className="actions">
 
@@ -600,7 +699,7 @@ export default function App() {
                   rel="noreferrer"
                   className="btn-download"
                 >
-                  Excel
+                  Exportar Excel
                 </a>
 
                 <a
@@ -609,19 +708,23 @@ export default function App() {
                   rel="noreferrer"
                   className="btn-download"
                 >
-                  CSV
+                  Exportar CSV
                 </a>
 
               </div>
 
             )}
 
-            <button
-              className="btn-secondary"
-              onClick={novaFoto}
-            >
-              Nova Foto
-            </button>
+            {!exportado && (
+
+              <button
+                className="btn-secondary"
+                onClick={novaFoto}
+              >
+                Nova Foto
+              </button>
+
+            )}
 
           </div>
 
