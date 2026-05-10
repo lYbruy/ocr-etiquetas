@@ -8,7 +8,17 @@ import pandas as pd
 import os
 import uuid
 import re
-import requests
+
+from paddleocr import PaddleOCR
+
+# =========================
+# OCR
+# =========================
+
+ocr = PaddleOCR(
+    use_angle_cls=True,
+    lang='en'
+)
 
 # =========================
 # FASTAPI
@@ -38,50 +48,21 @@ def limpar_texto(texto):
 
     texto = texto.replace("\n", " ")
 
-    lixo = [
-        "REEN",
-        "REEK",
-        "REF",
-        "TIPO",
-        "COD",
-        "BUL",
-        "YPO",
-        "PEF",
-        "EXP",
-        "FECHA",
-        "|",
-        ":",
-        ";"
-    ]
-
-    for l in lixo:
-        texto = texto.replace(l, "")
-
     return texto.strip()
 
 # =========================
-# EXTRAIR CÓDIGO POSTAL
+# EXTRAIR CODIGO POSTAL
 # =========================
 
-def extrair_codigo_postal(texto):
+def extrair_codigo(texto):
 
-    match = re.search(r"\d{4}-\d{3}", texto)
+    match = re.search(
+        r'\d{4}-\d{3}',
+        texto
+    )
 
     if match:
         return match.group()
-
-    match = re.search(r"\d{4}\s?\d{3}", texto)
-
-    if match:
-
-        codigo = match.group()
-
-        codigo = codigo.replace(
-            " ",
-            "-"
-        )
-
-        return codigo
 
     return ""
 
@@ -95,14 +76,12 @@ def extrair_morada(texto):
 
     for linha in linhas:
 
-        linha = linha.strip()
+        linha_upper = linha.upper()
 
         if (
-            "RUA" in linha.upper()
-            or "AVENIDA" in linha.upper()
-            or "ALAMEDA" in linha.upper()
-            or "TRAVESSA" in linha.upper()
-            or "ESTRADA" in linha.upper()
+            "RUA" in linha_upper
+            or "AVENIDA" in linha_upper
+            or "ALAMEDA" in linha_upper
         ):
 
             return linha
@@ -118,20 +97,20 @@ async def upload(file: UploadFile = File(...)):
 
     try:
 
-        # =========================
-        # SALVAR FOTO
-        # =========================
+        # salvar foto
 
         nome = f"{uuid.uuid4()}.jpg"
 
         caminho = f"uploads/{nome}"
 
         with open(caminho, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
 
-        # =========================
-        # ABRIR IMAGEM
-        # =========================
+            shutil.copyfileobj(
+                file.file,
+                buffer
+            )
+
+        # abrir imagem
 
         img = cv2.imread(caminho)
 
@@ -141,31 +120,18 @@ async def upload(file: UploadFile = File(...)):
                 "erro": "Erro ao abrir imagem"
             }
 
-        # =========================
-        # REDIMENSIONAR
-        # =========================
-
-        img = cv2.resize(
-            img,
-            None,
-            fx=2,
-            fy=2,
-            interpolation=cv2.INTER_CUBIC
-        )
-
-        # =========================
-        # PROCESSAR IMAGEM
-        # =========================
+        # melhorar imagem
 
         gray = cv2.cvtColor(
             img,
             cv2.COLOR_BGR2GRAY
         )
 
-        gray = cv2.GaussianBlur(
+        gray = cv2.resize(
             gray,
-            (3, 3),
-            0
+            None,
+            fx=2,
+            fy=2
         )
 
         gray = cv2.threshold(
@@ -175,81 +141,57 @@ async def upload(file: UploadFile = File(...)):
             cv2.THRESH_BINARY + cv2.THRESH_OTSU
         )[1]
 
-        # =========================
-        # OCR ONLINE
-        # =========================
+        temp_path = "temp.jpg"
 
-        _, img_encoded = cv2.imencode(
-            '.jpg',
+        cv2.imwrite(
+            temp_path,
             gray
         )
 
-        response = requests.post(
-            'https://api.ocr.space/parse/image',
-            files={
-                'filename': img_encoded.tobytes()
-            },
-            data={
-                'apikey': 'helloworld',
-                'language': 'eng',
-            },
+        # OCR
+
+        resultado = ocr.ocr(
+            temp_path,
+            cls=True
         )
-
-        resultado = response.json()
-
-        print("\n========== OCR RAW ==========\n")
-        print(resultado)
 
         texto = ""
 
-        if (
-            "ParsedResults" in resultado
-            and len(resultado["ParsedResults"]) > 0
-        ):
+        for bloco in resultado:
 
-            texto = resultado["ParsedResults"][0].get(
-                "ParsedText",
-                ""
-            )
+            for linha in bloco:
+
+                txt = linha[1][0]
+
+                texto += txt + "\n"
 
         texto = limpar_texto(texto)
 
         print("\n========== OCR ==========\n")
         print(texto)
 
-        # =========================
-        # EXTRAIR DADOS
-        # =========================
+        # extrair dados
 
-        codigo_postal = extrair_codigo_postal(texto)
+        codigo = extrair_codigo(
+            texto
+        )
 
-        morada = extrair_morada(texto)
+        morada = extrair_morada(
+            texto
+        )
 
-        # =========================
-        # FALLBACK
-        # =========================
-
-        if not codigo_postal:
-
-            if "3800" in texto:
-                codigo_postal = "3800"
-
-        # =========================
-        # DATAFRAME
-        # =========================
+        # dataframe
 
         dados = pd.DataFrame([{
             "Morada": morada,
-            "Código Postal": codigo_postal
+            "Código Postal": codigo
         }])
 
         arquivo_excel = "exports/resultado.xlsx"
 
-        # =========================
-        # CONCATENAR
-        # =========================
-
-        if os.path.exists(arquivo_excel):
+        if os.path.exists(
+            arquivo_excel
+        ):
 
             antigo = pd.read_excel(
                 arquivo_excel
@@ -264,9 +206,7 @@ async def upload(file: UploadFile = File(...)):
 
             final = dados
 
-        # =========================
-        # SALVAR
-        # =========================
+        # salvar
 
         final.to_excel(
             arquivo_excel,
@@ -278,13 +218,14 @@ async def upload(file: UploadFile = File(...)):
             index=False
         )
 
-        # =========================
-        # RESPOSTA
-        # =========================
+        # resposta
 
         return {
+
             "morada": morada if morada else "Não encontrada",
-            "codigo_postal": codigo_postal if codigo_postal else "Não encontrado",
+
+            "codigo_postal": codigo if codigo else "Não encontrado",
+
             "texto_ocr": texto
         }
 
