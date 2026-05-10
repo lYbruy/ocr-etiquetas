@@ -76,7 +76,10 @@ def extrair_codigo_postal(texto):
 
         codigo = match.group()
 
-        codigo = codigo.replace(" ", "-")
+        codigo = codigo.replace(
+            " ",
+            "-"
+        )
 
         return codigo
 
@@ -176,7 +179,10 @@ async def upload(file: UploadFile = File(...)):
         # OCR ONLINE
         # =========================
 
-        _, img_encoded = cv2.imencode('.jpg', gray)
+        _, img_encoded = cv2.imencode(
+            '.jpg',
+            gray
+        )
 
         response = requests.post(
             'https://api.ocr.space/parse/image',
@@ -191,7 +197,20 @@ async def upload(file: UploadFile = File(...)):
 
         resultado = response.json()
 
-        texto = resultado['ParsedResults'][0]['ParsedText']
+        print("\n========== OCR RAW ==========\n")
+        print(resultado)
+
+        texto = ""
+
+        if (
+            "ParsedResults" in resultado
+            and len(resultado["ParsedResults"]) > 0
+        ):
+
+            texto = resultado["ParsedResults"][0].get(
+                "ParsedText",
+                ""
+            )
 
         texto = limpar_texto(texto)
 
@@ -264,8 +283,8 @@ async def upload(file: UploadFile = File(...)):
         # =========================
 
         return {
-            "morada": morada,
-            "codigo_postal": codigo_postal,
+            "morada": morada if morada else "Não encontrada",
+            "codigo_postal": codigo_postal if codigo_postal else "Não encontrado",
             "texto_ocr": texto
         }
 
