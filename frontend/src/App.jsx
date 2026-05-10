@@ -167,6 +167,8 @@ export default function App() {
     await iniciarCamera()
   }
 
+  const resultados = resultado?.resultados || []
+
   return (
     <div className="root">
 
@@ -312,9 +314,7 @@ export default function App() {
             onClick={tirarFoto}
             disabled={loading}
           >
-
             Tirar Foto
-
           </button>
 
         )}
@@ -348,29 +348,57 @@ export default function App() {
 
             <div className="fields">
 
-              <div className="field">
+              {resultados.length > 0 ? resultados.map((item, index) => (
 
-                <span className="field-label">
-                  Morada
-                </span>
+                <div
+                  className="field"
+                  key={`${item.codigo_postal}-${index}`}
+                >
 
-                <span className="field-value">
-                  {resultado.morada || 'Não encontrada'}
-                </span>
+                  <span className="field-label">
+                    Resultado {index + 1}
+                  </span>
 
-              </div>
+                  <span className="field-value">
+                    {item.morada}
+                  </span>
 
-              <div className="field">
+                  <span className="field-value mono">
+                    {item.codigo_postal}
+                    {item.localidade ? ` ${item.localidade}` : ''}
+                  </span>
 
-                <span className="field-label">
-                  Código Postal
-                </span>
+                </div>
 
-                <span className="field-value mono">
-                  {resultado.codigo_postal || 'Não encontrado'}
-                </span>
+              )) : (
 
-              </div>
+                <>
+                  <div className="field">
+
+                    <span className="field-label">
+                      Morada
+                    </span>
+
+                    <span className="field-value">
+                      {resultado.morada || 'Não encontrada'}
+                    </span>
+
+                  </div>
+
+                  <div className="field">
+
+                    <span className="field-label">
+                      Código Postal
+                    </span>
+
+                    <span className="field-value mono">
+                      {resultado.codigo_postal || 'Não encontrado'}
+                    </span>
+
+                  </div>
+                </>
+
+              )}
 
             </div>
 
