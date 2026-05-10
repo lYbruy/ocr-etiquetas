@@ -5,7 +5,7 @@ WORKDIR /app
 # Dependências do sistema:
 # libgl1/libglib2.0-0 = OpenCV/cv2
 # libgomp1 = PaddleOCR/Paddle
-# curl = opcional, útil pra debug/health
+# curl = debug/health
 RUN apt-get update && apt-get install -y \
     libgl1 \
     libglib2.0-0 \

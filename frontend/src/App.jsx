@@ -14,10 +14,16 @@ export default function App() {
 
   useEffect(() => {
     iniciarCamera()
+
+    return () => {
+      pararCamera()
+    }
   }, [])
 
   async function iniciarCamera() {
     try {
+      setErro(null)
+
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: 'environment',
@@ -26,19 +32,47 @@ export default function App() {
         },
       })
 
-      videoRef.current.srcObject = stream
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+      }
     } catch (e) {
+      console.error(e)
       setErro('Não foi possível aceder à câmara.')
+    }
+  }
+
+  function pararCamera() {
+    try {
+      const video = videoRef.current
+
+      if (video && video.srcObject) {
+        video.srcObject
+          .getTracks()
+          .forEach(track => track.stop())
+
+        video.srcObject = null
+      }
+    } catch (e) {
+      console.error(e)
     }
   }
 
   async function tirarFoto() {
     setLoading(true)
     setErro(null)
+    setResultado(null)
 
     try {
       const video = videoRef.current
       const canvas = canvasRef.current
+
+      if (!video || !canvas) {
+        throw new Error('Câmara não encontrada.')
+      }
+
+      if (!video.videoWidth || !video.videoHeight) {
+        throw new Error('A câmara ainda não carregou. Tente novamente.')
+      }
 
       canvas.width = video.videoWidth
       canvas.height = video.videoHeight
@@ -60,12 +94,14 @@ export default function App() {
 
       setFoto(imageData)
 
-      // parar câmera
-      video.srcObject
-        .getTracks()
-        .forEach(track => track.stop())
+      pararCamera()
 
       canvas.toBlob(async (blob) => {
+        if (!blob) {
+          setErro('Erro ao gerar imagem.')
+          setLoading(false)
+          return
+        }
 
         const form = new FormData()
 
@@ -76,6 +112,7 @@ export default function App() {
         )
 
         try {
+          console.log('Enviando imagem para API...')
 
           const response = await fetch(
             `${API}/upload`,
@@ -85,32 +122,36 @@ export default function App() {
             }
           )
 
+          const data = await response.json().catch(() => null)
+
+          console.log('STATUS:', response.status)
+          console.log('RESPOSTA:', data)
+
           if (!response.ok) {
-            throw new Error()
+            throw new Error(data?.erro || `Erro HTTP ${response.status}`)
           }
 
-          const data = await response.json()
+          if (data?.erro) {
+            throw new Error(data.erro)
+          }
 
           setResultado(data)
-
-        } catch {
+        } catch (e) {
+          console.error(e)
 
           setErro(
-            'Falha ao processar a etiqueta.'
+            e.message || 'Falha ao processar a etiqueta.'
           )
-
         } finally {
-
           setLoading(false)
-
         }
-
       }, 'image/jpeg', 1)
 
-    } catch {
+    } catch (e) {
+      console.error(e)
 
       setErro(
-        'Erro ao tirar foto.'
+        e.message || 'Erro ao tirar foto.'
       )
 
       setLoading(false)
@@ -121,6 +162,7 @@ export default function App() {
     setFoto(null)
     setResultado(null)
     setErro(null)
+    setLoading(false)
 
     await iniciarCamera()
   }
@@ -203,6 +245,7 @@ export default function App() {
                 ref={videoRef}
                 autoPlay
                 playsInline
+                muted
                 className="video"
               />
 
@@ -272,6 +315,17 @@ export default function App() {
 
             Tirar Foto
 
+          </button>
+
+        )}
+
+        {foto && erro && !loading && (
+
+          <button
+            className="btn-secondary"
+            onClick={novaFoto}
+          >
+            Nova Foto
           </button>
 
         )}

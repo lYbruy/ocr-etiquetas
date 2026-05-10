@@ -8,6 +8,7 @@ import pandas as pd
 import os
 import uuid
 import re
+import traceback
 
 from paddleocr import PaddleOCR
 
@@ -17,7 +18,7 @@ from paddleocr import PaddleOCR
 
 ocr = PaddleOCR(
     use_angle_cls=True,
-    lang='en'
+    lang="en"
 )
 
 # =========================
@@ -34,6 +35,24 @@ app.add_middleware(
 )
 
 # =========================
+# ROTAS DE TESTE
+# =========================
+
+@app.get("/")
+async def home():
+    return {
+        "status": "online",
+        "message": "API OCR funcionando"
+    }
+
+
+@app.get("/health")
+async def health():
+    return {
+        "status": "ok"
+    }
+
+# =========================
 # PASTAS
 # =========================
 
@@ -45,9 +64,8 @@ os.makedirs("exports", exist_ok=True)
 # =========================
 
 def limpar_texto(texto):
-
-    texto = texto.replace("\n", " ")
-
+    texto = texto.replace("\r", "\n")
+    texto = re.sub(r"\n+", "\n", texto)
     return texto.strip()
 
 # =========================
@@ -55,9 +73,8 @@ def limpar_texto(texto):
 # =========================
 
 def extrair_codigo(texto):
-
     match = re.search(
-        r'\d{4}-\d{3}',
+        r"\d{4}-\d{3}",
         texto
     )
 
@@ -71,20 +88,30 @@ def extrair_codigo(texto):
 # =========================
 
 def extrair_morada(texto):
-
     linhas = texto.split("\n")
 
+    palavras_morada = [
+        "RUA",
+        "AVENIDA",
+        "AV.",
+        "ALAMEDA",
+        "TRAVESSA",
+        "LARGO",
+        "PRAÇA",
+        "PRACA",
+        "ESTRADA",
+        "CAMINHO",
+        "URBANIZAÇÃO",
+        "URBANIZACAO"
+    ]
+
     for linha in linhas:
+        linha_limpa = linha.strip()
+        linha_upper = linha_limpa.upper()
 
-        linha_upper = linha.upper()
-
-        if (
-            "RUA" in linha_upper
-            or "AVENIDA" in linha_upper
-            or "ALAMEDA" in linha_upper
-        ):
-
-            return linha
+        for palavra in palavras_morada:
+            if palavra in linha_upper:
+                return linha_limpa
 
     return ""
 
@@ -96,32 +123,35 @@ def extrair_morada(texto):
 async def upload(file: UploadFile = File(...)):
 
     try:
+        print("\n========== RECEBEU UPLOAD ==========", flush=True)
+        print(f"Arquivo: {file.filename}", flush=True)
+        print(f"Tipo: {file.content_type}", flush=True)
 
         # salvar foto
-
         nome = f"{uuid.uuid4()}.jpg"
-
         caminho = f"uploads/{nome}"
 
         with open(caminho, "wb") as buffer:
-
             shutil.copyfileobj(
                 file.file,
                 buffer
             )
 
-        # abrir imagem
+        print(f"Imagem salva em: {caminho}", flush=True)
 
+        # abrir imagem
         img = cv2.imread(caminho)
 
         if img is None:
+            print("Erro: cv2 não conseguiu abrir a imagem", flush=True)
 
             return {
                 "erro": "Erro ao abrir imagem"
             }
 
-        # melhorar imagem
+        print("Imagem aberta com sucesso", flush=True)
 
+        # melhorar imagem
         gray = cv2.cvtColor(
             img,
             cv2.COLOR_BGR2GRAY
@@ -131,7 +161,8 @@ async def upload(file: UploadFile = File(...)):
             gray,
             None,
             fx=2,
-            fy=2
+            fy=2,
+            interpolation=cv2.INTER_CUBIC
         )
 
         gray = cv2.threshold(
@@ -141,61 +172,62 @@ async def upload(file: UploadFile = File(...)):
             cv2.THRESH_BINARY + cv2.THRESH_OTSU
         )[1]
 
-        temp_path = "temp.jpg"
+        temp_path = f"uploads/temp_{uuid.uuid4()}.jpg"
 
         cv2.imwrite(
             temp_path,
             gray
         )
 
+        print(f"Imagem processada salva em: {temp_path}", flush=True)
+
         # OCR
+        print("Iniciando OCR...", flush=True)
 
         resultado = ocr.ocr(
             temp_path,
             cls=True
         )
 
+        print("OCR finalizado", flush=True)
+
         texto = ""
 
-        for bloco in resultado:
-
-            for linha in bloco:
-
-                txt = linha[1][0]
-
-                texto += txt + "\n"
+        if resultado:
+            for bloco in resultado:
+                if bloco:
+                    for linha in bloco:
+                        try:
+                            txt = linha[1][0]
+                            texto += txt + "\n"
+                        except Exception:
+                            pass
 
         texto = limpar_texto(texto)
 
-        print("\n========== OCR ==========\n")
-        print(texto)
+        print("\n========== TEXTO OCR ==========\n", flush=True)
+        print(texto, flush=True)
 
         # extrair dados
+        codigo = extrair_codigo(texto)
+        morada = extrair_morada(texto)
 
-        codigo = extrair_codigo(
-            texto
-        )
-
-        morada = extrair_morada(
-            texto
-        )
+        print("\n========== DADOS EXTRAÍDOS ==========", flush=True)
+        print(f"Morada: {morada}", flush=True)
+        print(f"Código Postal: {codigo}", flush=True)
 
         # dataframe
-
         dados = pd.DataFrame([{
             "Morada": morada,
-            "Código Postal": codigo
+            "Código Postal": codigo,
+            "Texto OCR": texto
         }])
 
         arquivo_excel = "exports/resultado.xlsx"
+        arquivo_csv = "exports/resultado.csv"
 
-        if os.path.exists(
-            arquivo_excel
-        ):
-
-            antigo = pd.read_excel(
-                arquivo_excel
-            )
+        if os.path.exists(arquivo_excel):
+            antigo = pd.read_excel(arquivo_excel)
 
             final = pd.concat(
                 [antigo, dados],
@@ -203,36 +235,37 @@ async def upload(file: UploadFile = File(...)):
             )
 
         else:
-
             final = dados
 
         # salvar
-
         final.to_excel(
             arquivo_excel,
             index=False
         )
 
         final.to_csv(
-            "exports/resultado.csv",
+            arquivo_csv,
             index=False
         )
 
+        print("Arquivos Excel/CSV salvos com sucesso", flush=True)
+
+        # apagar temporário
+        try:
+            os.remove(temp_path)
+        except Exception:
+            pass
+
         # resposta
-
         return {
-
             "morada": morada if morada else "Não encontrada",
-
             "codigo_postal": codigo if codigo else "Não encontrado",
-
-            "texto_ocr": texto
+            "texto_ocr": texto if texto else "Nenhum texto encontrado"
         }
 
     except Exception as e:
-
-        print("\n========== ERRO ==========\n")
-        print(str(e))
+        print("\n========== ERRO ==========\n", flush=True)
+        traceback.print_exc()
 
         return {
             "erro": str(e)
@@ -245,8 +278,20 @@ async def upload(file: UploadFile = File(...)):
 @app.get("/download-excel")
 async def download_excel():
 
+    arquivo_excel = "exports/resultado.xlsx"
+
+    if not os.path.exists(arquivo_excel):
+        pd.DataFrame(columns=[
+            "Morada",
+            "Código Postal",
+            "Texto OCR"
+        ]).to_excel(
+            arquivo_excel,
+            index=False
+        )
+
     return FileResponse(
-        path="exports/resultado.xlsx",
+        path=arquivo_excel,
         filename="resultado.xlsx"
     )
 
@@ -257,7 +302,19 @@ async def download_excel():
 @app.get("/download-csv")
 async def download_csv():
 
+    arquivo_csv = "exports/resultado.csv"
+
+    if not os.path.exists(arquivo_csv):
+        pd.DataFrame(columns=[
+            "Morada",
+            "Código Postal",
+            "Texto OCR"
+        ]).to_csv(
+            arquivo_csv,
+            index=False
+        )
+
     return FileResponse(
-        path="exports/resultado.csv",
+        path=arquivo_csv,
         filename="resultado.csv"
     )
