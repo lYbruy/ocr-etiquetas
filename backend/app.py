@@ -8,14 +8,7 @@ import pandas as pd
 import os
 import uuid
 import re
-import pytesseract
-
-# =========================
-# TESSERACT
-# =========================
-
-if os.name == "nt":
-    pytesseract.pytesseract.tesseract_cmd = r"C:\Programas\Tesseract-OCR\tesseract.exe"
+import requests
 
 # =========================
 # FASTAPI
@@ -83,10 +76,7 @@ def extrair_codigo_postal(texto):
 
         codigo = match.group()
 
-        codigo = codigo.replace(
-            " ",
-            "-"
-        )
+        codigo = codigo.replace(" ", "-")
 
         return codigo
 
@@ -183,13 +173,25 @@ async def upload(file: UploadFile = File(...)):
         )[1]
 
         # =========================
-        # OCR
+        # OCR ONLINE
         # =========================
 
-        texto = pytesseract.image_to_string(
-            gray,
-            lang='eng'
+        _, img_encoded = cv2.imencode('.jpg', gray)
+
+        response = requests.post(
+            'https://api.ocr.space/parse/image',
+            files={
+                'filename': img_encoded.tobytes()
+            },
+            data={
+                'apikey': 'helloworld',
+                'language': 'eng',
+            },
         )
+
+        resultado = response.json()
+
+        texto = resultado['ParsedResults'][0]['ParsedText']
 
         texto = limpar_texto(texto)
 
