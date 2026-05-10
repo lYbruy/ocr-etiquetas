@@ -45,31 +45,52 @@ export default function App() {
   }
 
   async function iniciarCamera() {
-    try {
-      setErro(null)
-      setAutoStatus('A abrir câmara...')
+  try {
+    setErro(null)
+    setAutoStatus('A abrir câmara...')
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: 'environment',
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-        },
-      })
+    pararAutoDetector()
+    pararCamera()
 
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: 'environment',
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+      },
+    })
 
-        videoRef.current.onloadedmetadata = () => {
-          setAutoStatus('Aponte para a etiqueta')
-          iniciarAutoDetector()
-        }
-      }
-    } catch (e) {
-      console.error(e)
-      setErro('Não foi possível aceder à câmara.')
+    const video = videoRef.current
+
+    if (!video) {
+      throw new Error('Vídeo não encontrado.')
     }
+
+    video.srcObject = stream
+
+    await new Promise((resolve) => {
+      video.onloadedmetadata = () => {
+        resolve()
+      }
+    })
+
+    await video.play()
+
+    capturandoRef.current = false
+    stableCountRef.current = 0
+
+    setAutoStatus('Aponte para a etiqueta')
+
+    setTimeout(() => {
+      iniciarAutoDetector()
+    }, 700)
+
+  } catch (e) {
+    console.error(e)
+    setErro('Não foi possível aceder à câmara.')
+    setAutoStatus('Erro ao abrir câmara')
   }
+}
 
   function pararCamera() {
     try {
@@ -179,6 +200,9 @@ export default function App() {
   }
 
   async function tirarFoto(auto = false) {
+    pararAutoDetector()
+    capturandoRef.current = true
+
     setLoading(true)
     setErro(null)
     setResultado(null)
@@ -294,6 +318,12 @@ export default function App() {
 
       setLoading(false)
       capturandoRef.current = false
+
+      if (!foto) {
+        setTimeout(() => {
+          iniciarCamera()
+        }, 500)
+      }
     }
   }
 
@@ -336,20 +366,28 @@ export default function App() {
     }
   }
 
-  async function novaFoto() {
-    setFoto(null)
-    setResultado(null)
-    setErro(null)
-    setLoading(false)
-    setExportado(false)
-    setMoradaEdit('')
-    setCodigoEdit('')
-    setCidadeEdit('')
-    capturandoRef.current = false
-    stableCountRef.current = 0
+async function novaFoto() {
+  pararAutoDetector()
+  pararCamera()
 
-    await iniciarCamera()
-  }
+  setFoto(null)
+  setResultado(null)
+  setErro(null)
+  setLoading(false)
+  setExportado(false)
+  setMoradaEdit('')
+  setCodigoEdit('')
+  setCidadeEdit('')
+
+  capturandoRef.current = false
+  stableCountRef.current = 0
+
+  setAutoStatus('A reiniciar câmara...')
+
+  setTimeout(() => {
+    iniciarCamera()
+  }, 400)
+}
 
   async function limparLote() {
     const confirmar = window.confirm(
