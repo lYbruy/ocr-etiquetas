@@ -51,7 +51,7 @@ def get_ocr():
 
         ocr = PaddleOCR(
             use_angle_cls=True,
-            lang="en",
+            lang="pt",
             show_log=False
         )
 
@@ -94,10 +94,19 @@ def limpar_texto(texto):
 # =========================
 
 def extrair_codigo(texto):
-    match = re.search(r"\d{4}-\d{3}", texto)
+    texto_limpo = texto.replace(" ", "").replace(".", "").replace(",", "")
+
+    match = re.search(r"(\d{4})[-]?(\'?\d{3})", texto_limpo)
 
     if match:
-        return match.group()
+        parte1 = match.group(1)
+        parte2 = match.group(2).replace("'", "")
+        return f"{parte1}-{parte2}"
+
+    match = re.search(r"\b(\d{4})\s*[- ]\s*(\d{3})\b", texto)
+
+    if match:
+        return f"{match.group(1)}-{match.group(2)}"
 
     return ""
 
@@ -163,6 +172,75 @@ def extrair_texto_ocr(resultado):
 # UPLOAD
 # =========================
 
+def criar_versoes_imagem(img, caminho_base):
+    versoes = []
+
+    original_path = caminho_base
+    versoes.append(original_path)
+
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    gray_path = f"uploads/gray_{uuid.uuid4()}.jpg"
+    cv2.imwrite(gray_path, gray)
+    versoes.append(gray_path)
+
+    resized = cv2.resize(
+        gray,
+        None,
+        fx=2,
+        fy=2,
+        interpolation=cv2.INTER_CUBIC
+    )
+
+    resized_path = f"uploads/resized_{uuid.uuid4()}.jpg"
+    cv2.imwrite(resized_path, resized)
+    versoes.append(resized_path)
+
+    blur = cv2.GaussianBlur(resized, (3, 3), 0)
+
+    sharp = cv2.addWeighted(
+        resized,
+        1.5,
+        blur,
+        -0.5,
+        0
+    )
+
+    sharp_path = f"uploads/sharp_{uuid.uuid4()}.jpg"
+    cv2.imwrite(sharp_path, sharp)
+    versoes.append(sharp_path)
+
+    return versoes
+
+
+def fazer_ocr_melhor(engine, caminhos):
+    melhor_texto = ""
+    melhor_resultado = None
+
+    for caminho_img in caminhos:
+        try:
+            print(f"Tentando OCR em: {caminho_img}", flush=True)
+
+            resultado = engine.ocr(
+                caminho_img,
+                cls=True
+            )
+
+            texto = extrair_texto_ocr(resultado)
+            texto = limpar_texto(texto)
+
+            print("Texto encontrado nesta versão:", flush=True)
+            print(texto, flush=True)
+
+            if len(texto) > len(melhor_texto):
+                melhor_texto = texto
+                melhor_resultado = resultado
+
+        except Exception:
+            traceback.print_exc()
+
+    return melhor_texto, melhor_resultado
+
 @app.post("/upload")
 async def upload(file: UploadFile = File(...)):
 
@@ -204,42 +282,17 @@ async def upload(file: UploadFile = File(...)):
 
         print("Imagem aberta com sucesso", flush=True)
 
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        print("Criando versões da imagem para OCR...", flush=True)
 
-        gray = cv2.resize(
-            gray,
-            None,
-            fx=2,
-            fy=2,
-            interpolation=cv2.INTER_CUBIC
-        )
-
-        gray = cv2.threshold(
-            gray,
-            0,
-            255,
-            cv2.THRESH_BINARY + cv2.THRESH_OTSU
-        )[1]
-
-        temp_path = f"uploads/temp_{uuid.uuid4()}.jpg"
-
-        cv2.imwrite(temp_path, gray)
-
-        print(f"Imagem processada salva em: {temp_path}", flush=True)
+        versoes = criar_versoes_imagem(img, caminho)
 
         print("Iniciando OCR...", flush=True)
 
         engine = get_ocr()
 
-        resultado = engine.ocr(
-            temp_path,
-            cls=True
-        )
+        texto, resultado = fazer_ocr_melhor(engine, versoes)
 
         print("OCR finalizado", flush=True)
-
-        texto = extrair_texto_ocr(resultado)
-        texto = limpar_texto(texto)
 
         print("\n========== TEXTO OCR ==========", flush=True)
         print(texto, flush=True)
@@ -301,8 +354,10 @@ async def upload(file: UploadFile = File(...)):
 
     finally:
         try:
-            if temp_path and os.path.exists(temp_path):
-                os.remove(temp_path)
+            for arquivo in os.listdir("uploads"):
+                if arquivo.startswith("temp_") or arquivo.startswith("gray_") or arquivo.startswith("resized_") or arquivo.startswith("sharp_"):
+                    caminho_temp = os.path.join("uploads", arquivo)
+                    os.remove(caminho_temp)
         except Exception:
             pass
 
