@@ -40,6 +40,9 @@ LOCALIDADES_AVEIRO = [
     "NOSSA SENHORA DE FÁTIMA",
 ]
 
+ARQUIVO_EXCEL = "exports/resultado.xlsx"
+ARQUIVO_CSV = "exports/resultado.csv"
+
 
 # =========================
 # FASTAPI
@@ -88,7 +91,7 @@ def get_ocr():
 
 
 # =========================
-# MODELO CONFIRMAÇÃO
+# MODELOS
 # =========================
 
 class ConfirmarPayload(BaseModel):
@@ -107,7 +110,9 @@ class ConfirmarPayload(BaseModel):
 async def home():
     return {
         "status": "online",
-        "message": "API OCR funcionando"
+        "message": "API OCR funcionando",
+        "modo": "lote",
+        "filtro": "Somente códigos 3800 e 3810 de Aveiro"
     }
 
 
@@ -787,12 +792,24 @@ def rodar_ocr_em_versoes(versoes: list[str]) -> str:
 
 
 # =========================
-# EXPORTAÇÃO CONFIRMADA
+# EXPORTAÇÃO EM LOTE
 # =========================
 
+def garantir_arquivo_exportacao():
+    if not os.path.exists(ARQUIVO_EXCEL):
+        df = pd.DataFrame(columns=[
+            "Morada",
+            "Código Postal",
+            "Cidade",
+            "Texto OCR"
+        ])
+
+        df.to_excel(ARQUIVO_EXCEL, index=False)
+        df.to_csv(ARQUIVO_CSV, index=False)
+
+
 def salvar_resultado_confirmado(morada: str, codigo: str, cidade: str, texto_ocr: str):
-    arquivo_excel = "exports/resultado.xlsx"
-    arquivo_csv = "exports/resultado.csv"
+    garantir_arquivo_exportacao()
 
     novo = pd.DataFrame([{
         "Morada": morada,
@@ -801,14 +818,23 @@ def salvar_resultado_confirmado(morada: str, codigo: str, cidade: str, texto_ocr
         "Texto OCR": texto_ocr
     }])
 
-    if os.path.exists(arquivo_excel):
-        antigo = pd.read_excel(arquivo_excel)
-        final = pd.concat([antigo, novo], ignore_index=True)
-    else:
-        final = novo
+    antigo = pd.read_excel(ARQUIVO_EXCEL)
 
-    final.to_excel(arquivo_excel, index=False)
-    final.to_csv(arquivo_csv, index=False)
+    final = pd.concat([antigo, novo], ignore_index=True)
+
+    final.to_excel(ARQUIVO_EXCEL, index=False)
+    final.to_csv(ARQUIVO_CSV, index=False)
+
+
+def contar_exportados() -> int:
+    if not os.path.exists(ARQUIVO_EXCEL):
+        return 0
+
+    try:
+        df = pd.read_excel(ARQUIVO_EXCEL)
+        return len(df)
+    except Exception:
+        return 0
 
 
 # =========================
@@ -879,13 +905,14 @@ async def upload(file: UploadFile = File(...)):
 
         return {
             "status": "aguardando_confirmacao",
-            "mensagem": "Confirme ou edite os dados antes de exportar.",
+            "mensagem": "Confirme ou edite os dados. Depois será adicionado ao lote.",
             "upload_id": upload_id,
             "morada": morada,
             "codigo_postal": codigo,
             "cidade": cidade,
             "texto_ocr": texto if texto else "Nenhum texto encontrado",
             "todos_resultados": dados_extraidos["todos_resultados"],
+            "total_exportados": contar_exportados(),
             "filtro": "Somente códigos 3800 e 3810 de Aveiro"
         }
 
@@ -907,7 +934,7 @@ async def upload(file: UploadFile = File(...)):
 
 
 # =========================
-# CONFIRMAR E EXPORTAR
+# CONFIRMAR E ADICIONAR AO LOTE
 # =========================
 
 @app.post("/confirmar")
@@ -945,15 +972,62 @@ async def confirmar(payload: ConfirmarPayload):
         if payload.upload_id and payload.upload_id in uploads_pendentes:
             del uploads_pendentes[payload.upload_id]
 
+        total = contar_exportados()
+
         return {
-            "status": "exportado",
+            "status": "adicionado_ao_lote",
+            "mensagem": "Etiqueta adicionada ao lote com sucesso.",
             "morada": morada,
             "codigo_postal": codigo,
-            "cidade": cidade
+            "cidade": cidade,
+            "total_exportados": total
         }
 
     except Exception as e:
         print("\n========== ERRO AO CONFIRMAR ==========", flush=True)
+        traceback.print_exc()
+
+        return {
+            "erro": str(e)
+        }
+
+
+# =========================
+# RESUMO DO LOTE
+# =========================
+
+@app.get("/resumo-lote")
+async def resumo_lote():
+    total = contar_exportados()
+
+    return {
+        "total_exportados": total
+    }
+
+
+# =========================
+# LIMPAR LOTE
+# =========================
+
+@app.delete("/limpar-lote")
+async def limpar_lote():
+    try:
+        if os.path.exists(ARQUIVO_EXCEL):
+            os.remove(ARQUIVO_EXCEL)
+
+        if os.path.exists(ARQUIVO_CSV):
+            os.remove(ARQUIVO_CSV)
+
+        uploads_pendentes.clear()
+
+        return {
+            "status": "lote_limpo",
+            "mensagem": "Lote apagado com sucesso.",
+            "total_exportados": 0
+        }
+
+    except Exception as e:
+        print("\n========== ERRO AO LIMPAR LOTE ==========", flush=True)
         traceback.print_exc()
 
         return {
@@ -968,18 +1042,10 @@ async def confirmar(payload: ConfirmarPayload):
 @app.get("/download-excel")
 async def download_excel():
 
-    arquivo_excel = "exports/resultado.xlsx"
-
-    if not os.path.exists(arquivo_excel):
-        pd.DataFrame(columns=[
-            "Morada",
-            "Código Postal",
-            "Cidade",
-            "Texto OCR"
-        ]).to_excel(arquivo_excel, index=False)
+    garantir_arquivo_exportacao()
 
     return FileResponse(
-        path=arquivo_excel,
+        path=ARQUIVO_EXCEL,
         filename="resultado.xlsx"
     )
 
@@ -991,73 +1057,9 @@ async def download_excel():
 @app.get("/download-csv")
 async def download_csv():
 
-    arquivo_csv = "exports/resultado.csv"
-
-    if not os.path.exists(arquivo_csv):
-        pd.DataFrame(columns=[
-            "Morada",
-            "Código Postal",
-            "Cidade",
-            "Texto OCR"
-        ]).to_csv(arquivo_csv, index=False)
+    garantir_arquivo_exportacao()
 
     return FileResponse(
-        path=arquivo_csv,
+        path=ARQUIVO_CSV,
         filename="resultado.csv"
     )
-
-    # =========================
-# TOTAL EXPORTADO
-# =========================
-
-@app.get("/total-exportados")
-async def total_exportados():
-
-    arquivo_excel = "exports/resultado.xlsx"
-
-    if not os.path.exists(arquivo_excel):
-        return {
-            "total": 0
-        }
-
-    try:
-        df = pd.read_excel(arquivo_excel)
-
-        return {
-            "total": len(df)
-        }
-
-    except Exception:
-        return {
-            "total": 0
-        }
-
-
-# =========================
-# LIMPAR LOTE
-# =========================
-
-@app.post("/limpar-lote")
-async def limpar_lote():
-
-    try:
-        arquivo_excel = "exports/resultado.xlsx"
-        arquivo_csv = "exports/resultado.csv"
-
-        if os.path.exists(arquivo_excel):
-            os.remove(arquivo_excel)
-
-        if os.path.exists(arquivo_csv):
-            os.remove(arquivo_csv)
-
-        uploads_pendentes.clear()
-
-        return {
-            "status": "lote_limpo",
-            "total": 0
-        }
-
-    except Exception as e:
-        return {
-            "erro": str(e)
-        }
