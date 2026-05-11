@@ -554,3 +554,26 @@ body::before {
   pointer-events: none;
   overflow: hidden;
 }
+
+.lote-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+}
+
+.lote-box span {
+  font-size: 12px;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.lote-box strong {
+  font-family: var(--font-mono);
+  color: var(--accent);
+  font-size: 18px;
+}

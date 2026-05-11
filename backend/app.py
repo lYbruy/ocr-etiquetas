@@ -19,71 +19,28 @@ from paddleocr import PaddleOCR
 
 PREFIXOS_ACEITES = ["3800", "3810"]
 
-ARQUIVO_EXCEL = "exports/resultado.xlsx"
-ARQUIVO_CSV = "exports/resultado.csv"
+EXPORT_EXCEL = "exports/resultado.xlsx"
+EXPORT_CSV = "exports/resultado.csv"
 
-PALAVRAS_MORADA = [
-    "RUA",
-    "AVENIDA",
-    "AV.",
-    "ALAMEDA",
-    "TRAVESSA",
-    "LARGO",
-    "PRAÇA",
-    "PRACA",
-    "ESTRADA",
-    "CAMINHO",
-    "URBANIZAÇÃO",
-    "URBANIZACAO",
-    "ROTUNDA",
-    "BECO",
-    "BAIRRO",
-    "QUINTA",
-    "LOTE",
-    "ZONA",
-    "R.",
-]
-
-PALAVRAS_DESCARTAR = [
-    "HTTP",
-    "HTTPS",
-    "WWW",
-    "APP.COM",
-    "ATT:",
-    "OBS",
-    "PROCURAR",
-    "EXP:",
-    "REF:",
-    "BULTO",
-    "PESO",
-    "DATA",
-    "FECHA",
-    "REEMBOLSO",
-    "PAGADO",
-    "TIPO PORTES",
-    "COD. BULTO",
-    "COD BULTO",
-    "PAQ24",
-    "SN1",
-    "SNI",
-    "R-",
-    "PALPITE",
-    "REMITENTE",
-    "AMAZON",
-    "SPAIN",
-    "MADRID",
-    "YVES",
-    "ROCHER",
-    "COSMETICOS",
-    "COSMÉTICOS",
-    "LDA",
-    "S.A",
-    " SA ",
-    "ELECTROMECANICOS",
-    "ELECTROMECÂNICOS",
-    "VIVEIRO",
-    "VIVEIROS",
-    "000030038",
+LOCALIDADES_AVEIRO = [
+    "AVEIRO",
+    "CACIA",
+    "CÁCIA",
+    "ESGUEIRA",
+    "ARADAS",
+    "GLORIA",
+    "GLÓRIA",
+    "VERA CRUZ",
+    "SANTA JOANA",
+    "SAO BERNARDO",
+    "SÃO BERNARDO",
+    "OLIVEIRINHA",
+    "EIXO",
+    "EIROL",
+    "NARIZ",
+    "REQUEIXO",
+    "NOSSA SENHORA DE FATIMA",
+    "NOSSA SENHORA DE FÁTIMA",
 ]
 
 
@@ -102,11 +59,16 @@ app.add_middleware(
 
 
 # =========================
-# PASTAS / ESTADO
+# PASTAS
 # =========================
 
 os.makedirs("uploads", exist_ok=True)
 os.makedirs("exports", exist_ok=True)
+
+
+# =========================
+# MEMÓRIA DO LOTE
+# =========================
 
 ocr_engine = None
 uploads_pendentes = {}
@@ -114,19 +76,7 @@ lote_confirmado = []
 
 
 # =========================
-# MODELOS
-# =========================
-
-class ConfirmarPayload(BaseModel):
-    upload_id: str | None = None
-    morada: str
-    codigo_postal: str
-    cidade: str | None = ""
-    texto_ocr: str | None = ""
-
-
-# =========================
-# OCR
+# OCR GLOBAL
 # =========================
 
 def get_ocr():
@@ -147,6 +97,18 @@ def get_ocr():
 
 
 # =========================
+# MODELOS
+# =========================
+
+class ConfirmarPayload(BaseModel):
+    upload_id: str | None = None
+    morada: str
+    codigo_postal: str
+    cidade: str | None = ""
+    texto_ocr: str | None = ""
+
+
+# =========================
 # ROTAS TESTE
 # =========================
 
@@ -154,7 +116,8 @@ def get_ocr():
 async def home():
     return {
         "status": "online",
-        "message": "API OCR funcionando"
+        "message": "API OCR funcionando",
+        "filtro": "Somente códigos postais 3800 e 3810"
     }
 
 
@@ -166,39 +129,6 @@ async def health():
 
 
 # =========================
-# LIMPAR LOTE
-# =========================
-
-@app.post("/limpar-lote")
-async def limpar_lote():
-    global lote_confirmado
-    global uploads_pendentes
-
-    lote_confirmado = []
-    uploads_pendentes = {}
-
-    for arquivo in [ARQUIVO_EXCEL, ARQUIVO_CSV]:
-        try:
-            if os.path.exists(arquivo):
-                os.remove(arquivo)
-        except Exception:
-            pass
-
-    return {
-        "status": "limpo",
-        "total": 0
-    }
-
-
-@app.get("/resumo-lote")
-async def resumo_lote():
-    return {
-        "total": len(lote_confirmado),
-        "itens": lote_confirmado
-    }
-
-
-# =========================
 # NORMALIZAÇÃO
 # =========================
 
@@ -206,13 +136,13 @@ def limpar_linha(linha: str) -> str:
     linha = str(linha).strip()
 
     linha = linha.replace("º", "°")
-    linha = linha.replace("N°", "Nº")
-    linha = linha.replace("N.", "Nº")
     linha = linha.replace(" N ", " Nº ")
     linha = linha.replace(" N°", " Nº")
     linha = linha.replace(" N.", " Nº")
-    linha = linha.replace(" No ", " Nº ")
     linha = linha.replace(" N0 ", " Nº ")
+    linha = linha.replace(" No ", " Nº ")
+    linha = linha.replace("N°", "Nº")
+    linha = linha.replace("N.", "Nº")
 
     linha = re.sub(r"\s+", " ", linha)
 
@@ -227,6 +157,7 @@ def normalizar_texto(texto: str) -> str:
 
     for linha in texto.split("\n"):
         linha = limpar_linha(linha)
+
         if linha:
             linhas.append(linha)
 
@@ -242,10 +173,13 @@ def corrigir_ocr_para_morada(texto: str) -> str:
         "AVElRO": "AVEIRO",
         "AVElR0": "AVEIRO",
         "AVFIR0": "AVEIRO",
-        "CAC1A": "CACIA",
-        "CÁC1A": "CÁCIA",
+        "AVR0": "AVEIRO",
+        "AVRO": "AVEIRO",
+        "AVR": "AVEIRO",
         "PORTUGA": "PORTUGAL",
         "POR TUGAL": "PORTUGAL",
+        "CACIA PORTUGALO.C.": "CACIA PORTUGAL",
+        "CACIA PORTUGAL-O.C.": "CACIA PORTUGAL",
         "A1AMEDA": "ALAMEDA",
         "A1ameda": "Alameda",
         "S1LVA": "SILVA",
@@ -253,10 +187,16 @@ def corrigir_ocr_para_morada(texto: str) -> str:
         "R0CHA": "ROCHA",
         "R0A": "RUA",
         "RU4": "RUA",
+        "NACIONAD": "NACIONAL",
+        "NACLONA": "NACIONAL",
+        "NACIONA": "NACIONAL",
+        "EST.NAC": "ESTRADA NACIONAL",
+        "EST NAC": "ESTRADA NACIONAL",
         "EUROPAN": "EUROPA Nº",
         "EUROPA N": "EUROPA Nº",
         "AVENIDAEUROPA": "AVENIDA EUROPA",
         "AVENIDA EUROPA N292": "AVENIDA EUROPA Nº292",
+        "AVENIDA EUROPA N°292": "AVENIDA EUROPA Nº292",
         "AVENIDA EUROPA Nº 292": "AVENIDA EUROPA Nº292",
     }
 
@@ -264,15 +204,8 @@ def corrigir_ocr_para_morada(texto: str) -> str:
         texto = texto.replace(errado, certo)
 
     texto = re.sub(
-        r"\b(AVENIDA|RUA|ALAMEDA|TRAVESSA|ESTRADA|CAMINHO|LARGO|PRAÇA|PRACA)\s*([A-ZÁÀÂÃÉÈÊÍÌÓÒÔÕÚÙÇ ]+?)\s+N[º°]?\s*(\d+)",
+        r"\b(AVENIDA|RUA|ALAMEDA|TRAVESSA|ESTRADA|CAMINHO|LARGO|PRAÇA|PRACA)\s*([A-ZÁÀÂÃÉÈÊÍÌÓÒÔÕÚÙÇ ]+?)N[º°]?\s*(\d+)",
         r"\1 \2 Nº\3",
-        texto,
-        flags=re.IGNORECASE
-    )
-
-    texto = re.sub(
-        r"\b(AVENIDA|RUA|ALAMEDA|TRAVESSA|ESTRADA|CAMINHO|LARGO|PRAÇA|PRACA)([A-ZÁÀÂÃÉÈÊÍÌÓÒÔÕÚÙÇ])",
-        r"\1 \2",
         texto,
         flags=re.IGNORECASE
     )
@@ -299,133 +232,274 @@ def converter_ocr_numero(texto: str) -> str:
 
 
 # =========================
-# VALIDADORES
+# PALAVRAS
 # =========================
 
-def linha_tem_lixo(linha: str) -> bool:
-    l = linha.upper()
-    return any(p in l for p in PALAVRAS_DESCARTAR)
+PALAVRAS_MORADA = [
+    "RUA",
+    "AVENIDA",
+    "AV.",
+    "ALAMEDA",
+    "TRAVESSA",
+    "LARGO",
+    "PRAÇA",
+    "PRACA",
+    "ESTRADA",
+    "ESTRADA NACIONAL",
+    "EST.",
+    "EST ",
+    "ESTR.",
+    "EST.NAC",
+    "EST NAC",
+    "NACIONAL",
+    "CAMINHO",
+    "URBANIZAÇÃO",
+    "URBANIZACAO",
+    "ROTUNDA",
+    "BECO",
+    "BAIRRO",
+    "QUINTA",
+    "LOTE",
+    "ZONA",
+    "R.",
+]
+
+PALAVRAS_DESCARTAR = [
+    "HTTP",
+    "HTTPS",
+    "APP.COM",
+    "WWW",
+    "ATT:",
+    "OBS",
+    "PROCURAR",
+    "YVES",
+    "ROCHER",
+    "COSMETICOS",
+    "COSMÉTICOS",
+    "LDA",
+    "S.A",
+    " SA ",
+    "000030038",
+    "SN1",
+    "SNI",
+    "R-",
+    "PALPITE",
+    "EXP:",
+    "REF:",
+    "COD BULTO",
+    "BULTO",
+    "PESO",
+    "DATA",
+    "FECHA",
+    "REMITENTE",
+    "AMAZON",
+    "SPAIN",
+    "MADRID",
+    "TIPO PORTES",
+    "PAGADO",
+    "REEMBOLSO",
+    "ENVIO",
+    "1DE1",
+    "1 DE1",
+    "KGS",
+]
 
 
-def codigo_postal_aveiro_valido(cp: str) -> bool:
-    if not re.match(r"^\d{4}-\d{3}$", cp):
+# =========================
+# FILTRO CÓDIGO POSTAL
+# =========================
+
+def cp_eh_aveiro(cp: str) -> bool:
+    if not re.match(r"^\d{4}-\d{3}$", str(cp)):
+        return False
+
+    return cp[:4] in PREFIXOS_ACEITES
+
+
+def codigo_postal_valido(cp: str) -> bool:
+    if not re.match(r"^\d{4}-\d{3}$", str(cp)):
         return False
 
     prefixo = cp[:4]
-    sufixo = int(cp[5:])
+    sufixo = cp[5:]
 
     if prefixo not in PREFIXOS_ACEITES:
         return False
 
-    if sufixo < 1:
+    if int(sufixo) < 1:
         return False
 
     return True
 
 
-def eh_morada_valida(linha: str) -> bool:
-    l = corrigir_ocr_para_morada(linha).upper()
+def texto_tem_localidade_aveiro(texto: str) -> bool:
+    t = corrigir_ocr_para_morada(texto).upper()
 
-    if not l:
-        return False
-
-    if linha_tem_lixo(l):
-        return False
-
-    tem_palavra = any(p in l for p in PALAVRAS_MORADA)
-    tem_numero = bool(re.search(r"\d", l))
-
-    return tem_palavra and tem_numero
+    return any(loc in t for loc in LOCALIDADES_AVEIRO)
 
 
-def eh_linha_cidade(linha: str) -> bool:
-    l = corrigir_ocr_para_morada(linha).upper()
+def linha_tem_lixo_para_cp(linha: str) -> bool:
+    l = str(linha).upper()
 
-    if not l:
-        return False
+    bloqueios_fortes = [
+        "HTTP",
+        "APP.COM",
+        "WWW",
+        "ATT:",
+        "OBS",
+        "PROCURAR",
+        "PALPITE",
+        "000030038",
+        "EXP:",
+        "REF:",
+        "BULTO",
+        "PESO",
+        "COD.",
+        "COD ",
+        "GR:",
+        "NºVEND",
+        "VEND:",
+        "DATA:",
+        "HORA:",
+    ]
 
-    if linha_tem_lixo(l):
-        return False
-
-    if re.search(r"\d{4}-\d{3}", l):
-        return False
-
-    letras = len(re.findall(r"[A-ZÁÀÂÃÉÈÊÍÌÓÒÔÕÚÙÇ]", l))
-    numeros = len(re.findall(r"\d", l))
-
-    return letras >= 3 and numeros <= 2
+    return any(x in l for x in bloqueios_fortes)
 
 
-# =========================
-# EXTRAÇÃO DO CÓDIGO POSTAL
-# =========================
+def extrair_cp_mesma_linha(linha: str) -> dict | None:
+    original = str(linha).upper()
+
+    if linha_tem_lixo_para_cp(original):
+        return None
+
+    linha_num = converter_ocr_numero(original)
+
+    linha_num = linha_num.replace("PT-", "")
+    linha_num = linha_num.replace("P-", "")
+    linha_num = linha_num.replace("P ", "")
+
+    # Normal: 3800-974, 3800 974, 3810-856
+    m = re.search(r"\b(3800|3810)\s*[- ]\s*(\d{3})\b", linha_num)
+
+    if m:
+        cp = f"{m.group(1)}-{m.group(2)}"
+
+        if codigo_postal_valido(cp):
+            cidade = linha_num[m.end():].strip()
+            cidade = corrigir_ocr_para_morada(cidade)
+
+            return {
+                "codigo": cp,
+                "cidade": cidade,
+                "origem": "mesma_linha"
+            }
+
+    # OCR comum: P-3801-856AVRO => 3810-856 AVEIRO
+    m_3801 = re.search(r"\b3801\s*[- ]\s*(\d{3})\b", linha_num)
+
+    if m_3801 and (
+        "AVEIRO" in original
+        or "AVRO" in original
+        or "AVR0" in original
+        or "AVEI" in original
+    ):
+        cp = f"3810-{m_3801.group(1)}"
+
+        if codigo_postal_valido(cp):
+            cidade = linha_num[m_3801.end():].strip()
+            cidade = corrigir_ocr_para_morada(cidade)
+
+            return {
+                "codigo": cp,
+                "cidade": cidade,
+                "origem": "corrigido_3801"
+            }
+
+    return None
+
+
+def extrair_cp_partido(linhas: list[str], i: int) -> dict | None:
+    linha = linhas[i].strip()
+
+    if linha_tem_lixo_para_cp(linha):
+        return None
+
+    linha_num = converter_ocr_numero(linha)
+    linha_limpa = re.sub(r"[^0-9]", "", linha_num)
+
+    if linha_limpa not in ["3800", "3810", "3801"]:
+        return None
+
+    prefixo = linha_limpa
+
+    if prefixo == "3801":
+        prefixo = "3810"
+
+    if i + 1 >= len(linhas):
+        return None
+
+    prox_original = linhas[i + 1].strip()
+
+    if linha_tem_lixo_para_cp(prox_original):
+        return None
+
+    prox_num = converter_ocr_numero(prox_original)
+
+    m = re.match(r"^\s*(\d{3})\s*[- ]?\s*(.*)$", prox_num)
+
+    if not m:
+        return None
+
+    cp = f"{prefixo}-{m.group(1)}"
+
+    if not codigo_postal_valido(cp):
+        return None
+
+    cidade = m.group(2).strip()
+    cidade = corrigir_ocr_para_morada(cidade)
+    cidade = re.sub(r"[^A-ZÁÀÂÃÉÈÊÍÌÓÒÔÕÚÙÇ ]", " ", cidade)
+    cidade = limpar_linha(cidade)
+
+    return {
+        "codigo": cp,
+        "linha_index": i,
+        "cidade": cidade,
+        "origem": "partido"
+    }
+
 
 def extrair_codigos_postais_aveiro(linhas: list[str]) -> list[dict]:
     encontrados = []
 
     for i, linha in enumerate(linhas):
-        linha_original = linha.strip()
+        mesmo = extrair_cp_mesma_linha(linha)
 
-        if linha_tem_lixo(linha_original):
-            continue
+        if mesmo:
+            cidade = mesmo.get("cidade", "")
 
-        linha_num = converter_ocr_numero(linha_original)
+            if not cidade and i + 1 < len(linhas):
+                prox = linhas[i + 1].strip()
 
-        # Caso 1: 3800-974 / 3800 974 / 3810-193
-        matches = re.finditer(r"\b(3800|3810)\s*[- ]\s*(\d{3})\b", linha_num)
+                if eh_linha_cidade(prox):
+                    cidade = prox
 
-        for m in matches:
-            cp = f"{m.group(1)}-{m.group(2)}"
+            encontrados.append({
+                "codigo": mesmo["codigo"],
+                "linha_index": i,
+                "cidade": limpar_linha(corrigir_ocr_para_morada(cidade)),
+                "origem": mesmo.get("origem", "mesma_linha")
+            })
 
-            if codigo_postal_aveiro_valido(cp):
-                cidade = ""
+        partido = extrair_cp_partido(linhas, i)
 
-                depois = linha_original[m.end():].strip(" -,.")
-                if depois:
-                    cidade = corrigir_ocr_para_morada(depois)
-
-                if not cidade and i + 1 < len(linhas) and eh_linha_cidade(linhas[i + 1]):
-                    cidade = corrigir_ocr_para_morada(linhas[i + 1])
-
-                encontrados.append({
-                    "codigo": cp,
-                    "linha_index": i,
-                    "cidade": cidade,
-                    "origem": "mesma_linha"
-                })
-
-        # Caso 2: linha atual só tem 3800/3810 e a próxima tem 974-AVEIRO
-        somente_numeros = re.sub(r"[^0-9]", "", linha_num)
-
-        if somente_numeros in PREFIXOS_ACEITES and i + 1 < len(linhas):
-            prox_original = linhas[i + 1].strip()
-
-            if linha_tem_lixo(prox_original):
-                continue
-
-            prox_num = converter_ocr_numero(prox_original)
-            m2 = re.match(r"^\s*(\d{3})\s*[- ]?\s*(.*)$", prox_num)
-
-            if m2:
-                cp = f"{somente_numeros}-{m2.group(1)}"
-
-                if codigo_postal_aveiro_valido(cp):
-                    cidade = m2.group(2).strip()
-                    cidade = re.sub(r"[^A-ZÁÀÂÃÉÈÊÍÌÓÒÔÕÚÙÇ ]", " ", cidade)
-                    cidade = limpar_linha(corrigir_ocr_para_morada(cidade))
-
-                    encontrados.append({
-                        "codigo": cp,
-                        "linha_index": i,
-                        "cidade": cidade,
-                        "origem": "partido"
-                    })
+        if partido:
+            encontrados.append(partido)
 
     unicos = []
     vistos = set()
 
     for item in encontrados:
-        chave = f"{item['codigo']}-{item['linha_index']}"
+        chave = item["codigo"]
 
         if chave not in vistos:
             vistos.add(chave)
@@ -435,47 +509,90 @@ def extrair_codigos_postais_aveiro(linhas: list[str]) -> list[dict]:
 
 
 # =========================
-# EXTRAÇÃO DA MORADA
+# MORADA
 # =========================
+
+def eh_linha_cidade(linha: str) -> bool:
+    l = corrigir_ocr_para_morada(linha).upper().strip()
+
+    if not l:
+        return False
+
+    if any(x in l for x in PALAVRAS_DESCARTAR):
+        return False
+
+    if re.search(r"\d{4}-\d{3}", l):
+        return False
+
+    letras = len(re.findall(r"[A-ZÁÀÂÃÉÈÊÍÌÓÒÔÕÚÙÇ]", l))
+    numeros = len(re.findall(r"\d", l))
+
+    return letras >= 3 and numeros <= 3
+
+
+def eh_morada_valida(linha: str) -> bool:
+    l = corrigir_ocr_para_morada(linha).upper().strip()
+
+    if not l:
+        return False
+
+    if any(x in l for x in PALAVRAS_DESCARTAR):
+        return False
+
+    if re.search(r"\d{4}-\d{3}", l):
+        return False
+
+    tem_palavra_morada = any(p in l for p in PALAVRAS_MORADA)
+    tem_numero = bool(re.search(r"\d", l))
+
+    if re.search(r"EST\.?\s*NAC", l) and tem_numero:
+        return True
+
+    if re.search(r"ESTRADA\s+NACIONAL", l) and tem_numero:
+        return True
+
+    return tem_palavra_morada and tem_numero
+
 
 def pontuar_morada(linha: str, index: int, cp_index: int) -> int:
     l = corrigir_ocr_para_morada(linha).upper()
     score = 0
 
     if eh_morada_valida(linha):
-        score += 120
-
-    if "RUA" in l:
-        score += 25
+        score += 150
 
     if "AVENIDA" in l or "AV." in l:
-        score += 25
+        score += 35
+
+    if "RUA" in l or " R." in l:
+        score += 35
 
     if "ALAMEDA" in l:
-        score += 20
+        score += 25
 
     if "TRAVESSA" in l:
-        score += 15
+        score += 20
 
-    if "ESTRADA" in l or "CAMINHO" in l:
-        score += 15
+    if "ESTRADA" in l or "NACIONAL" in l or "EST.NAC" in l:
+        score += 30
 
     if "Nº" in l or "N°" in l:
-        score += 15
+        score += 18
 
     if re.search(r"\d", l):
-        score += 15
+        score += 20
 
     distancia = abs(cp_index - index)
     score += max(0, 70 - distancia * 10)
 
-    # Normalmente a morada vem antes do código postal
     if index < cp_index:
-        score += 25
+        score += 30
 
-    # Mas se estiver muito longe, perde força
+    if index > cp_index:
+        score -= 20
+
     if index < cp_index - 8:
-        score -= 40
+        score -= 35
 
     return score
 
@@ -506,41 +623,54 @@ def encontrar_morada_para_codigo(linhas: list[str], cp_info: dict) -> str:
     return candidatos[0]["linha"]
 
 
-def pontuar_resultado(item: dict) -> int:
+def pontuar_resultado(resultado: dict) -> int:
     score = 0
 
-    morada = item.get("morada", "")
-    cp = item.get("codigo_postal", "")
-    cidade = item.get("cidade", "")
-    contexto = item.get("contexto", "")
+    morada = resultado.get("morada", "")
+    codigo = resultado.get("codigo_postal", "")
+    cidade = resultado.get("cidade", "")
+    contexto = resultado.get("contexto", "")
 
-    if codigo_postal_aveiro_valido(cp):
+    if codigo_postal_valido(codigo):
         score += 200
 
     if morada and morada != "Não encontrada":
-        score += 120
+        score += 150
 
     if eh_morada_valida(morada):
-        score += 80
+        score += 70
 
     if cidade and cidade != "Não encontrada":
-        score += 20
+        score += 30
 
-    if "AVEIRO" in corrigir_ocr_para_morada(contexto).upper():
-        score += 40
+    if texto_tem_localidade_aveiro(cidade):
+        score += 45
 
-    if "CACIA" in corrigir_ocr_para_morada(contexto).upper() or "CÁCIA" in corrigir_ocr_para_morada(contexto).upper():
-        score += 40
+    if texto_tem_localidade_aveiro(contexto):
+        score += 45
 
-    # Penaliza linhas de referência/logística
-    contexto_upper = contexto.upper()
-    if any(x in contexto_upper for x in ["R-", "SN1", "PALPITE", "ATT:", "OBS", "EXP:", "REF:", "BULTO"]):
-        score -= 80
+    score += int(resultado.get("linha_codigo_index", 0)) * 2
 
-    # Se está mais abaixo na etiqueta, costuma ser destinatário
-    score += int(item.get("linha_codigo_index", 0)) * 3
+    texto_contexto = contexto.upper()
+
+    if any(x in texto_contexto for x in ["R-", "SN1", "PALPITE", "ATT:", "OBS", "EXP:", "REF:", "BULTO"]):
+        score -= 70
 
     return score
+
+
+def escolher_destinatario(resultados: list[dict]) -> dict | None:
+    validos = [
+        r for r in resultados
+        if codigo_postal_valido(r["codigo_postal"])
+    ]
+
+    if not validos:
+        return None
+
+    validos.sort(key=lambda x: x["score"], reverse=True)
+
+    return validos[0]
 
 
 def extrair_dados_aveiro(texto: str) -> dict:
@@ -552,24 +682,23 @@ def extrair_dados_aveiro(texto: str) -> dict:
     resultados = []
 
     for cp in cps:
-        codigo = cp["codigo"]
-
-        if not codigo_postal_aveiro_valido(codigo):
+        if not codigo_postal_valido(cp["codigo"]):
             continue
-
-        idx = cp["linha_index"]
-
-        contexto_inicio = max(0, idx - 6)
-        contexto_fim = min(len(linhas), idx + 6)
-        contexto = "\n".join(linhas[contexto_inicio:contexto_fim])
 
         morada = encontrar_morada_para_codigo(linhas, cp)
 
-        cidade = limpar_linha(corrigir_ocr_para_morada(cp.get("cidade", "")))
+        cidade = cp.get("cidade", "")
+        cidade = corrigir_ocr_para_morada(cidade)
+
+        idx = cp["linha_index"]
+
+        contexto_inicio = max(0, idx - 5)
+        contexto_fim = min(len(linhas), idx + 5)
+        contexto = "\n".join(linhas[contexto_inicio:contexto_fim])
 
         item = {
             "morada": morada if morada else "Não encontrada",
-            "codigo_postal": codigo,
+            "codigo_postal": cp["codigo"],
             "cidade": cidade if cidade else "Não encontrada",
             "linha_codigo_index": idx,
             "origem_codigo": cp.get("origem", ""),
@@ -582,9 +711,9 @@ def extrair_dados_aveiro(texto: str) -> dict:
 
     resultados.sort(key=lambda x: x["score"], reverse=True)
 
-    if resultados:
-        escolhido = resultados[0]
+    escolhido = escolher_destinatario(resultados)
 
+    if escolhido:
         return {
             "morada": escolhido["morada"],
             "codigo_postal": escolhido["codigo_postal"],
@@ -596,7 +725,7 @@ def extrair_dados_aveiro(texto: str) -> dict:
         "morada": "Não encontrada",
         "codigo_postal": "Não encontrado",
         "cidade": "Não encontrada",
-        "todos_resultados": []
+        "todos_resultados": resultados
     }
 
 
@@ -613,22 +742,13 @@ def criar_versoes_imagem(caminho: str) -> list[str]:
     versoes = [caminho]
     base = str(uuid.uuid4())
 
+    # Versão cinza
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     gray_path = f"uploads/gray_{base}.jpg"
     cv2.imwrite(gray_path, gray)
     versoes.append(gray_path)
 
-    resized = cv2.resize(
-        img,
-        None,
-        fx=1.4,
-        fy=1.4,
-        interpolation=cv2.INTER_CUBIC
-    )
-    resized_path = f"uploads/resized_{base}.jpg"
-    cv2.imwrite(resized_path, resized)
-    versoes.append(resized_path)
-
+    # Versão com nitidez
     blur = cv2.GaussianBlur(img, (0, 0), 3)
     sharp = cv2.addWeighted(img, 1.5, blur, -0.5, 0)
     sharp_path = f"uploads/sharp_{base}.jpg"
@@ -653,19 +773,21 @@ def extrair_texto_resultado_ocr(resultado) -> str:
             if isinstance(item, dict):
                 if "rec_texts" in item and isinstance(item["rec_texts"], list):
                     textos.extend([str(x) for x in item["rec_texts"]])
+
                 elif "text" in item:
                     textos.append(str(item["text"]))
 
             elif isinstance(item, list):
                 for linha in item:
                     try:
-                        if isinstance(linha, (list, tuple)) and len(linha) >= 2:
-                            data = linha[1]
+                        if isinstance(linha, list) or isinstance(linha, tuple):
+                            if len(linha) >= 2:
+                                data = linha[1]
 
-                            if isinstance(data, (tuple, list)):
-                                textos.append(str(data[0]))
-                            else:
-                                textos.append(str(data))
+                                if isinstance(data, tuple) or isinstance(data, list):
+                                    textos.append(str(data[0]))
+                                else:
+                                    textos.append(str(data))
                     except Exception:
                         pass
 
@@ -696,7 +818,6 @@ def juntar_textos_unicos(textos: list[str]) -> str:
 
 def rodar_ocr_em_versoes(versoes: list[str]) -> str:
     engine = get_ocr()
-
     textos = []
 
     for path in versoes:
@@ -722,6 +843,7 @@ def rodar_ocr_em_versoes(versoes: list[str]) -> str:
                 if texto:
                     textos.append(texto)
             except Exception:
+                print("Erro ao tentar OCR nessa versão", flush=True)
                 traceback.print_exc()
 
         except Exception:
@@ -735,30 +857,20 @@ def rodar_ocr_em_versoes(versoes: list[str]) -> str:
 # EXPORTAÇÃO
 # =========================
 
-def gerar_arquivos_lote():
-    df = pd.DataFrame(
-        lote_confirmado,
-        columns=[
-            "Morada",
-            "Código Postal",
-            "Cidade",
-            "Texto OCR"
-        ]
-    )
-
-    df.to_excel(ARQUIVO_EXCEL, index=False)
-    df.to_csv(ARQUIVO_CSV, index=False)
+def gerar_dataframe_lote():
+    return pd.DataFrame(lote_confirmado, columns=[
+        "Morada",
+        "Código Postal",
+        "Cidade",
+        "Texto OCR"
+    ])
 
 
-def salvar_resultado_confirmado(morada: str, codigo: str, cidade: str, texto_ocr: str):
-    lote_confirmado.append({
-        "Morada": morada,
-        "Código Postal": codigo,
-        "Cidade": cidade,
-        "Texto OCR": texto_ocr
-    })
+def salvar_lote_em_arquivos():
+    df = gerar_dataframe_lote()
 
-    gerar_arquivos_lote()
+    df.to_excel(EXPORT_EXCEL, index=False)
+    df.to_csv(EXPORT_CSV, index=False)
 
 
 # =========================
@@ -767,6 +879,7 @@ def salvar_resultado_confirmado(morada: str, codigo: str, cidade: str, texto_ocr
 
 @app.post("/upload")
 async def upload(file: UploadFile = File(...)):
+
     caminhos_temporarios = []
 
     try:
@@ -775,7 +888,9 @@ async def upload(file: UploadFile = File(...)):
         print(f"Tipo: {file.content_type}", flush=True)
 
         upload_id = str(uuid.uuid4())
-        caminho = f"uploads/{upload_id}.jpg"
+
+        nome = f"{upload_id}.jpg"
+        caminho = f"uploads/{nome}"
 
         with open(caminho, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
@@ -791,6 +906,7 @@ async def upload(file: UploadFile = File(...)):
 
         print("Imagem aberta com sucesso", flush=True)
 
+        print("Criando versões da imagem para OCR...", flush=True)
         versoes = criar_versoes_imagem(caminho)
         caminhos_temporarios.extend(versoes)
 
@@ -801,33 +917,37 @@ async def upload(file: UploadFile = File(...)):
         print("\n========== TEXTO OCR ==========", flush=True)
         print(texto, flush=True)
 
-        dados = extrair_dados_aveiro(texto)
+        dados_extraidos = extrair_dados_aveiro(texto)
+
+        morada = dados_extraidos["morada"]
+        codigo = dados_extraidos["codigo_postal"]
+        cidade = dados_extraidos["cidade"]
 
         uploads_pendentes[upload_id] = {
-            "morada": dados["morada"],
-            "codigo_postal": dados["codigo_postal"],
-            "cidade": dados["cidade"],
+            "morada": morada,
+            "codigo_postal": codigo,
+            "cidade": cidade,
             "texto_ocr": texto,
-            "todos_resultados": dados["todos_resultados"]
+            "todos_resultados": dados_extraidos["todos_resultados"]
         }
 
         print("\n========== SUGESTÃO EXTRAÍDA ==========", flush=True)
         print(f"Upload ID: {upload_id}", flush=True)
-        print(f"Morada: {dados['morada']}", flush=True)
-        print(f"Código Postal: {dados['codigo_postal']}", flush=True)
-        print(f"Cidade: {dados['cidade']}", flush=True)
+        print(f"Morada: {morada}", flush=True)
+        print(f"Código Postal: {codigo}", flush=True)
+        print(f"Cidade: {cidade}", flush=True)
 
         return {
             "status": "aguardando_confirmacao",
             "mensagem": "Confirme ou edite os dados antes de adicionar ao lote.",
             "upload_id": upload_id,
-            "morada": dados["morada"],
-            "codigo_postal": dados["codigo_postal"],
-            "cidade": dados["cidade"],
+            "morada": morada,
+            "codigo_postal": codigo,
+            "cidade": cidade,
             "texto_ocr": texto if texto else "Nenhum texto encontrado",
-            "todos_resultados": dados["todos_resultados"],
+            "todos_resultados": dados_extraidos["todos_resultados"],
             "total_lote": len(lote_confirmado),
-            "filtro": "Somente códigos 3800 e 3810 de Aveiro"
+            "filtro": "Somente códigos postais 3800 e 3810"
         }
 
     except Exception as e:
@@ -848,11 +968,12 @@ async def upload(file: UploadFile = File(...)):
 
 
 # =========================
-# CONFIRMAR
+# CONFIRMAR NO LOTE
 # =========================
 
 @app.post("/confirmar")
 async def confirmar(payload: ConfirmarPayload):
+
     try:
         morada = limpar_linha(corrigir_ocr_para_morada(payload.morada))
         codigo = payload.codigo_postal.strip()
@@ -865,9 +986,9 @@ async def confirmar(payload: ConfirmarPayload):
             if not texto_ocr:
                 texto_ocr = pendente.get("texto_ocr", "")
 
-        if not codigo_postal_aveiro_valido(codigo):
+        if not codigo_postal_valido(codigo):
             return {
-                "erro": "Código postal inválido. Só são aceites códigos 3800 ou 3810."
+                "erro": "Código postal inválido. Este sistema só aceita códigos postais de Aveiro começados por 3800 ou 3810."
             }
 
         if not morada or morada == "Não encontrada":
@@ -875,12 +996,15 @@ async def confirmar(payload: ConfirmarPayload):
                 "erro": "Morada vazia. Confirme ou escreva a morada correta."
             }
 
-        salvar_resultado_confirmado(
-            morada=morada,
-            codigo=codigo,
-            cidade=cidade,
-            texto_ocr=texto_ocr
-        )
+        item = {
+            "Morada": morada,
+            "Código Postal": codigo,
+            "Cidade": cidade,
+            "Texto OCR": texto_ocr
+        }
+
+        lote_confirmado.append(item)
+        salvar_lote_em_arquivos()
 
         if payload.upload_id and payload.upload_id in uploads_pendentes:
             del uploads_pendentes[payload.upload_id]
@@ -903,26 +1027,64 @@ async def confirmar(payload: ConfirmarPayload):
 
 
 # =========================
-# DOWNLOADS
+# LOTE
+# =========================
+
+@app.get("/resumo-lote")
+async def resumo_lote():
+    return {
+        "total": len(lote_confirmado),
+        "itens": lote_confirmado
+    }
+
+
+@app.post("/limpar-lote")
+async def limpar_lote():
+    lote_confirmado.clear()
+    uploads_pendentes.clear()
+
+    try:
+        if os.path.exists(EXPORT_EXCEL):
+            os.remove(EXPORT_EXCEL)
+
+        if os.path.exists(EXPORT_CSV):
+            os.remove(EXPORT_CSV)
+    except Exception:
+        pass
+
+    return {
+        "status": "lote_limpo",
+        "total": 0
+    }
+
+
+# =========================
+# DOWNLOAD EXCEL
 # =========================
 
 @app.get("/download-excel")
 async def download_excel():
-    if not os.path.exists(ARQUIVO_EXCEL):
-        gerar_arquivos_lote()
+
+    if not os.path.exists(EXPORT_EXCEL):
+        salvar_lote_em_arquivos()
 
     return FileResponse(
-        path=ARQUIVO_EXCEL,
+        path=EXPORT_EXCEL,
         filename="resultado.xlsx"
     )
 
 
+# =========================
+# DOWNLOAD CSV
+# =========================
+
 @app.get("/download-csv")
 async def download_csv():
-    if not os.path.exists(ARQUIVO_CSV):
-        gerar_arquivos_lote()
+
+    if not os.path.exists(EXPORT_CSV):
+        salvar_lote_em_arquivos()
 
     return FileResponse(
-        path=ARQUIVO_CSV,
+        path=EXPORT_CSV,
         filename="resultado.csv"
     )

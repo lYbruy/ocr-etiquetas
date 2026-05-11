@@ -10,7 +10,6 @@ export default function App() {
   const autoTimerRef = useRef(null)
   const stableCountRef = useRef(0)
   const capturandoRef = useRef(false)
-  const ultimoScanRef = useRef(0)
 
   const [foto, setFoto] = useState(null)
   const [resultado, setResultado] = useState(null)
@@ -34,16 +33,31 @@ export default function App() {
   }, [])
 
   async function iniciarSistema() {
+    await limparLoteInicial()
+    await iniciarCamera()
+  }
+
+  async function limparLoteInicial() {
     try {
       await fetch(`${API}/limpar-lote`, {
         method: 'POST',
       })
+
+      setTotalLote(0)
     } catch (e) {
       console.error(e)
     }
+  }
 
-    setTotalLote(0)
-    await iniciarCamera()
+  async function atualizarResumoLote() {
+    try {
+      const response = await fetch(`${API}/resumo-lote`)
+      const data = await response.json()
+
+      setTotalLote(data?.total || 0)
+    } catch (e) {
+      console.error(e)
+    }
   }
 
   async function iniciarCamera() {
@@ -65,10 +79,16 @@ export default function App() {
       if (videoRef.current) {
         videoRef.current.srcObject = stream
 
+        await videoRef.current.play().catch(() => {})
+
         videoRef.current.onloadedmetadata = () => {
           setAutoStatus('Aponte para a etiqueta')
           iniciarAutoDetector()
         }
+
+        setTimeout(() => {
+          iniciarAutoDetector()
+        }, 800)
       }
     } catch (e) {
       console.error(e)
@@ -115,21 +135,11 @@ export default function App() {
     const video = videoRef.current
     const canvas = detectorCanvasRef.current
 
-    if (!video || !canvas) {
-      return
-    }
-
-    if (foto || loading || capturandoRef.current) {
+    if (!video || !canvas || foto || loading || capturandoRef.current) {
       return
     }
 
     if (!video.videoWidth || !video.videoHeight) {
-      return
-    }
-
-    const agora = Date.now()
-
-    if (agora - ultimoScanRef.current < 2500) {
       return
     }
 
@@ -148,13 +158,13 @@ export default function App() {
 
     let bright = 0
     let dark = 0
-    let total = 0
     let edges = 0
+    let total = 0
 
-    const startX = Math.floor(width * 0.07)
-    const endX = Math.floor(width * 0.93)
-    const startY = Math.floor(height * 0.10)
-    const endY = Math.floor(height * 0.90)
+    const startX = Math.floor(width * 0.08)
+    const endX = Math.floor(width * 0.92)
+    const startY = Math.floor(height * 0.12)
+    const endY = Math.floor(height * 0.88)
 
     let lastLum = null
 
@@ -188,15 +198,14 @@ export default function App() {
       brightRatio > 0.22 &&
       brightRatio < 0.92 &&
       darkRatio > 0.01 &&
-      edgeRatio > 0.06
+      edgeRatio > 0.025
 
     if (pareceEtiqueta) {
       stableCountRef.current += 1
-      setAutoStatus(`Etiqueta detectada ${stableCountRef.current}/3`)
+      setAutoStatus(`Etiqueta detectada ${stableCountRef.current}/2`)
 
-      if (stableCountRef.current >= 3) {
+      if (stableCountRef.current >= 2) {
         capturandoRef.current = true
-        ultimoScanRef.current = Date.now()
         pararAutoDetector()
         tirarFoto(true)
       }
@@ -237,12 +246,16 @@ export default function App() {
         canvas.height
       )
 
-      const imageData = canvas.toDataURL('image/jpeg', 0.92)
+      const imageData = canvas.toDataURL(
+        'image/jpeg',
+        0.92
+      )
 
       setFoto(imageData)
       setAutoStatus(auto ? 'Foto capturada automaticamente' : 'Foto capturada')
 
       pararAutoDetector()
+      pararCamera()
 
       canvas.toBlob(async (blob) => {
         if (!blob) {
@@ -261,6 +274,8 @@ export default function App() {
         )
 
         try {
+          console.log('Enviando imagem para API...')
+
           const response = await fetch(
             `${API}/upload`,
             {
@@ -270,6 +285,9 @@ export default function App() {
           )
 
           const data = await response.json().catch(() => null)
+
+          console.log('STATUS:', response.status)
+          console.log('RESPOSTA:', data)
 
           if (!response.ok) {
             throw new Error(data?.erro || `Erro HTTP ${response.status}`)
@@ -300,7 +318,10 @@ export default function App() {
           )
         } catch (e) {
           console.error(e)
-          setErro(e.message || 'Falha ao processar a etiqueta.')
+
+          setErro(
+            e.message || 'Falha ao processar a etiqueta.'
+          )
         } finally {
           setLoading(false)
           capturandoRef.current = false
@@ -309,13 +330,17 @@ export default function App() {
 
     } catch (e) {
       console.error(e)
-      setErro(e.message || 'Erro ao tirar foto.')
+
+      setErro(
+        e.message || 'Erro ao tirar foto.'
+      )
+
       setLoading(false)
       capturandoRef.current = false
     }
   }
 
-  async function confirmarAdicionarAoLote() {
+  async function confirmarEtiqueta() {
     try {
       setErro(null)
       setLoading(true)
@@ -344,12 +369,12 @@ export default function App() {
         throw new Error(data.erro)
       }
 
-      setTotalLote(data?.total_lote || totalLote + 1)
       setAdicionado(true)
+      setTotalLote(data?.total_lote || 0)
 
       setTimeout(() => {
-        prepararProximaEtiqueta()
-      }, 650)
+        proximaEtiqueta()
+      }, 800)
     } catch (e) {
       console.error(e)
       setErro(e.message || 'Erro ao confirmar etiqueta.')
@@ -358,44 +383,37 @@ export default function App() {
     }
   }
 
-  function prepararProximaEtiqueta() {
+  async function proximaEtiqueta() {
     setFoto(null)
     setResultado(null)
     setErro(null)
     setLoading(false)
     setAdicionado(false)
-
     setMoradaEdit('')
     setCodigoEdit('')
     setCidadeEdit('')
-
     capturandoRef.current = false
     stableCountRef.current = 0
 
-    setAutoStatus('Aponte para a próxima etiqueta')
-    iniciarAutoDetector()
+    await iniciarCamera()
   }
 
-  async function novaFoto() {
-    setFoto(null)
-    setResultado(null)
-    setErro(null)
-    setLoading(false)
-    setAdicionado(false)
+  async function limparTudo() {
+    try {
+      setErro(null)
+      setLoading(true)
 
-    setMoradaEdit('')
-    setCodigoEdit('')
-    setCidadeEdit('')
+      await fetch(`${API}/limpar-lote`, {
+        method: 'POST',
+      })
 
-    capturandoRef.current = false
-    stableCountRef.current = 0
-
-    setAutoStatus('Aponte para a etiqueta')
-
-    if (!videoRef.current?.srcObject) {
-      await iniciarCamera()
-    } else {
-      iniciarAutoDetector()
+      setTotalLote(0)
+      await proximaEtiqueta()
+    } catch (e) {
+      console.error(e)
+      setErro('Erro ao limpar lote.')
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -464,24 +482,34 @@ export default function App() {
           </h1>
 
           <span className="badge">
-            {totalLote} no lote
+            v1.2
           </span>
 
         </header>
 
+        <div className="lote-box">
+          <span>
+            Etiquetas no lote
+          </span>
+
+          <strong>
+            {totalLote}
+          </strong>
+        </div>
+
         <div className="viewport">
 
-          <div className={foto ? 'camera-wrap camera-hidden' : 'camera-wrap'}>
+          {!foto ? (
 
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              className="video"
-            />
+            <div className="camera-wrap">
 
-            {!foto && (
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className="video"
+              />
 
               <div className="overlay">
 
@@ -493,19 +521,13 @@ export default function App() {
 
               </div>
 
-            )}
-
-            {!foto && (
-
               <p className="hint">
                 {autoStatus}
               </p>
 
-            )}
+            </div>
 
-          </div>
-
-          {foto && (
+          ) : (
 
             <div className="preview-wrap">
 
@@ -651,7 +673,7 @@ export default function App() {
 
             <button
               className="btn-primary"
-              onClick={confirmarAdicionarAoLote}
+              onClick={confirmarEtiqueta}
               disabled={loading || adicionado}
             >
               {adicionado ? 'Adicionado ao lote' : 'Confirmar e adicionar ao lote'}
@@ -659,7 +681,8 @@ export default function App() {
 
             <button
               className="btn-secondary"
-              onClick={novaFoto}
+              onClick={proximaEtiqueta}
+              disabled={loading}
             >
               Ignorar e ler próxima
             </button>
@@ -670,43 +693,39 @@ export default function App() {
 
         {totalLote > 0 && (
 
-          <div className="resultado">
+          <div className="actions">
 
-            <div className="resultado-header">
+            <a
+              href={`${API}/download-excel`}
+              target="_blank"
+              rel="noreferrer"
+              className="btn-download"
+            >
+              Exportar Excel
+            </a>
 
-              <span className="resultado-status">
-
-                <span className="dot" />
-
-                Lote com {totalLote} etiqueta{totalLote === 1 ? '' : 's'}
-
-              </span>
-
-            </div>
-
-            <div className="actions">
-
-              <a
-                href={`${API}/download-excel`}
-                target="_blank"
-                rel="noreferrer"
-                className="btn-download"
-              >
-                Exportar Excel
-              </a>
-
-              <a
-                href={`${API}/download-csv`}
-                target="_blank"
-                rel="noreferrer"
-                className="btn-download"
-              >
-                Exportar CSV
-              </a>
-
-            </div>
+            <a
+              href={`${API}/download-csv`}
+              target="_blank"
+              rel="noreferrer"
+              className="btn-download"
+            >
+              Exportar CSV
+            </a>
 
           </div>
+
+        )}
+
+        {totalLote > 0 && (
+
+          <button
+            className="btn-secondary"
+            onClick={limparTudo}
+            disabled={loading}
+          >
+            Limpar lote
+          </button>
 
         )}
 
