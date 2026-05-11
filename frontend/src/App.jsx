@@ -10,13 +10,14 @@ export default function App() {
   const autoTimerRef = useRef(null)
   const stableCountRef = useRef(0)
   const capturandoRef = useRef(false)
+  const ultimoScanRef = useRef(0)
 
   const [foto, setFoto] = useState(null)
   const [resultado, setResultado] = useState(null)
   const [loading, setLoading] = useState(false)
   const [erro, setErro] = useState(null)
   const [autoStatus, setAutoStatus] = useState('Aponte para a etiqueta')
-  const [guardado, setGuardado] = useState(false)
+  const [adicionado, setAdicionado] = useState(false)
   const [totalLote, setTotalLote] = useState(0)
 
   const [moradaEdit, setMoradaEdit] = useState('')
@@ -24,8 +25,7 @@ export default function App() {
   const [cidadeEdit, setCidadeEdit] = useState('')
 
   useEffect(() => {
-    carregarResumo()
-    iniciarCamera()
+    iniciarSistema()
 
     return () => {
       pararAutoDetector()
@@ -33,24 +33,26 @@ export default function App() {
     }
   }, [])
 
-  async function carregarResumo() {
+  async function iniciarSistema() {
     try {
-      const response = await fetch(`${API}/resumo-lote`)
-      const data = await response.json()
-
-      setTotalLote(data?.total || 0)
+      await fetch(`${API}/limpar-lote`, {
+        method: 'POST',
+      })
     } catch (e) {
       console.error(e)
     }
+
+    setTotalLote(0)
+    await iniciarCamera()
   }
 
   async function iniciarCamera() {
     try {
-      pararAutoDetector()
-      pararCamera()
-
       setErro(null)
       setAutoStatus('A abrir câmara...')
+
+      pararAutoDetector()
+      pararCamera()
 
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
@@ -63,17 +65,10 @@ export default function App() {
       if (videoRef.current) {
         videoRef.current.srcObject = stream
 
-        await videoRef.current.play().catch(() => {})
-
         videoRef.current.onloadedmetadata = () => {
           setAutoStatus('Aponte para a etiqueta')
           iniciarAutoDetector()
         }
-
-        setTimeout(() => {
-          setAutoStatus('Aponte para a etiqueta')
-          iniciarAutoDetector()
-        }, 700)
       }
     } catch (e) {
       console.error(e)
@@ -100,9 +95,11 @@ export default function App() {
   function iniciarAutoDetector() {
     pararAutoDetector()
 
+    stableCountRef.current = 0
+
     autoTimerRef.current = setInterval(() => {
       detectarEtiquetaECapturar()
-    }, 650)
+    }, 700)
   }
 
   function pararAutoDetector() {
@@ -118,7 +115,11 @@ export default function App() {
     const video = videoRef.current
     const canvas = detectorCanvasRef.current
 
-    if (!video || !canvas || foto || loading || capturandoRef.current) {
+    if (!video || !canvas) {
+      return
+    }
+
+    if (foto || loading || capturandoRef.current) {
       return
     }
 
@@ -126,8 +127,14 @@ export default function App() {
       return
     }
 
+    const agora = Date.now()
+
+    if (agora - ultimoScanRef.current < 2500) {
+      return
+    }
+
     const width = 260
-    const height = 180
+    const height = 170
 
     canvas.width = width
     canvas.height = height
@@ -141,34 +148,34 @@ export default function App() {
 
     let bright = 0
     let dark = 0
-    let edges = 0
     let total = 0
+    let edges = 0
 
-    const startX = Math.floor(width * 0.08)
-    const endX = Math.floor(width * 0.92)
-    const startY = Math.floor(height * 0.12)
-    const endY = Math.floor(height * 0.88)
+    const startX = Math.floor(width * 0.07)
+    const endX = Math.floor(width * 0.93)
+    const startY = Math.floor(height * 0.10)
+    const endY = Math.floor(height * 0.90)
 
-    for (let y = startY; y < endY; y += 3) {
-      for (let x = startX; x < endX; x += 3) {
+    let lastLum = null
+
+    for (let y = startY; y < endY; y += 2) {
+      for (let x = startX; x < endX; x += 2) {
         const i = (y * width + x) * 4
-        const j = (y * width + Math.min(x + 3, width - 1)) * 4
 
         const r = data[i]
         const g = data[i + 1]
         const b = data[i + 2]
 
-        const r2 = data[j]
-        const g2 = data[j + 1]
-        const b2 = data[j + 2]
-
         const lum = (r + g + b) / 3
-        const lum2 = (r2 + g2 + b2) / 3
 
         if (lum > 165) bright++
         if (lum < 95) dark++
-        if (Math.abs(lum - lum2) > 35) edges++
 
+        if (lastLum !== null && Math.abs(lum - lastLum) > 45) {
+          edges++
+        }
+
+        lastLum = lum
         total++
       }
     }
@@ -181,14 +188,15 @@ export default function App() {
       brightRatio > 0.22 &&
       brightRatio < 0.92 &&
       darkRatio > 0.01 &&
-      edgeRatio > 0.025
+      edgeRatio > 0.06
 
     if (pareceEtiqueta) {
       stableCountRef.current += 1
-      setAutoStatus(`Etiqueta detectada ${stableCountRef.current}/2`)
+      setAutoStatus(`Etiqueta detectada ${stableCountRef.current}/3`)
 
-      if (stableCountRef.current >= 2) {
+      if (stableCountRef.current >= 3) {
         capturandoRef.current = true
+        ultimoScanRef.current = Date.now()
         pararAutoDetector()
         tirarFoto(true)
       }
@@ -202,11 +210,9 @@ export default function App() {
     setLoading(true)
     setErro(null)
     setResultado(null)
-    setGuardado(false)
+    setAdicionado(false)
 
     try {
-      pararAutoDetector()
-
       const video = videoRef.current
       const canvas = canvasRef.current
 
@@ -236,7 +242,7 @@ export default function App() {
       setFoto(imageData)
       setAutoStatus(auto ? 'Foto capturada automaticamente' : 'Foto capturada')
 
-      pararCamera()
+      pararAutoDetector()
 
       canvas.toBlob(async (blob) => {
         if (!blob) {
@@ -248,13 +254,20 @@ export default function App() {
 
         const form = new FormData()
 
-        form.append('file', blob, 'foto.jpg')
+        form.append(
+          'file',
+          blob,
+          'foto.jpg'
+        )
 
         try {
-          const response = await fetch(`${API}/upload`, {
-            method: 'POST',
-            body: form,
-          })
+          const response = await fetch(
+            `${API}/upload`,
+            {
+              method: 'POST',
+              body: form,
+            }
+          )
 
           const data = await response.json().catch(() => null)
 
@@ -285,8 +298,6 @@ export default function App() {
               ? data.cidade
               : ''
           )
-
-          setTotalLote(data?.total_exportado || totalLote)
         } catch (e) {
           console.error(e)
           setErro(e.message || 'Falha ao processar a etiqueta.')
@@ -304,7 +315,7 @@ export default function App() {
     }
   }
 
-  async function guardarNoLote() {
+  async function confirmarAdicionarAoLote() {
     try {
       setErro(null)
       setLoading(true)
@@ -333,59 +344,58 @@ export default function App() {
         throw new Error(data.erro)
       }
 
-      setGuardado(true)
-      setTotalLote(data?.total_exportado || 0)
+      setTotalLote(data?.total_lote || totalLote + 1)
+      setAdicionado(true)
 
       setTimeout(() => {
-        novaEtiqueta()
-      }, 700)
+        prepararProximaEtiqueta()
+      }, 650)
     } catch (e) {
       console.error(e)
-      setErro(e.message || 'Erro ao guardar no lote.')
+      setErro(e.message || 'Erro ao confirmar etiqueta.')
     } finally {
       setLoading(false)
     }
   }
 
-  async function novaEtiqueta() {
+  function prepararProximaEtiqueta() {
     setFoto(null)
     setResultado(null)
     setErro(null)
     setLoading(false)
-    setGuardado(false)
+    setAdicionado(false)
+
     setMoradaEdit('')
     setCodigoEdit('')
     setCidadeEdit('')
+
     capturandoRef.current = false
     stableCountRef.current = 0
 
-    await iniciarCamera()
+    setAutoStatus('Aponte para a próxima etiqueta')
+    iniciarAutoDetector()
   }
 
-  async function limparLote() {
-    const confirmar = window.confirm('Tem certeza que deseja limpar o lote atual?')
+  async function novaFoto() {
+    setFoto(null)
+    setResultado(null)
+    setErro(null)
+    setLoading(false)
+    setAdicionado(false)
 
-    if (!confirmar) {
-      return
-    }
+    setMoradaEdit('')
+    setCodigoEdit('')
+    setCidadeEdit('')
 
-    try {
-      setErro(null)
+    capturandoRef.current = false
+    stableCountRef.current = 0
 
-      const response = await fetch(`${API}/limpar-lote`, {
-        method: 'POST',
-      })
+    setAutoStatus('Aponte para a etiqueta')
 
-      const data = await response.json().catch(() => null)
-
-      if (data?.erro) {
-        throw new Error(data.erro)
-      }
-
-      setTotalLote(0)
-    } catch (e) {
-      console.error(e)
-      setErro(e.message || 'Erro ao limpar lote.')
+    if (!videoRef.current?.srcObject) {
+      await iniciarCamera()
+    } else {
+      iniciarAutoDetector()
     }
   }
 
@@ -406,10 +416,45 @@ export default function App() {
               viewBox="0 0 20 20"
               fill="none"
             >
-              <rect x="1" y="1" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.5" />
-              <rect x="13" y="1" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.5" />
-              <rect x="1" y="13" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.5" />
-              <rect x="13" y="13" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.5" />
+              <rect
+                x="1"
+                y="1"
+                width="6"
+                height="6"
+                rx="1"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              />
+
+              <rect
+                x="13"
+                y="1"
+                width="6"
+                height="6"
+                rx="1"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              />
+
+              <rect
+                x="1"
+                y="13"
+                width="6"
+                height="6"
+                rx="1"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              />
+
+              <rect
+                x="13"
+                y="13"
+                width="6"
+                height="6"
+                rx="1"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              />
             </svg>
 
           </div>
@@ -419,50 +464,48 @@ export default function App() {
           </h1>
 
           <span className="badge">
-            v1.2
+            {totalLote} no lote
           </span>
 
         </header>
 
-        <div className="lote-box">
-          <span>
-            Etiquetas guardadas no lote
-          </span>
-
-          <strong>
-            {totalLote}
-          </strong>
-        </div>
-
         <div className="viewport">
 
-          {!foto ? (
+          <div className={foto ? 'camera-wrap camera-hidden' : 'camera-wrap'}>
 
-            <div className="camera-wrap">
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              className="video"
+            />
 
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted
-                className="video"
-              />
+            {!foto && (
 
               <div className="overlay">
+
                 <div className="bracket tl" />
                 <div className="bracket tr" />
                 <div className="bracket bl" />
                 <div className="bracket br" />
                 <div className="scan-line" />
+
               </div>
+
+            )}
+
+            {!foto && (
 
               <p className="hint">
                 {autoStatus}
               </p>
 
-            </div>
+            )}
 
-          ) : (
+          </div>
+
+          {foto && (
 
             <div className="preview-wrap">
 
@@ -492,8 +535,15 @@ export default function App() {
 
         </div>
 
-        <canvas ref={canvasRef} hidden />
-        <canvas ref={detectorCanvasRef} hidden />
+        <canvas
+          ref={canvasRef}
+          hidden
+        />
+
+        <canvas
+          ref={detectorCanvasRef}
+          hidden
+        />
 
         {erro && (
           <p className="erro">
@@ -504,11 +554,11 @@ export default function App() {
         {!foto && (
 
           <button
-            className="btn-secondary"
+            className="btn-primary"
             onClick={() => tirarFoto(false)}
             disabled={loading}
           >
-            Capturar agora
+            Tirar Foto Manualmente
           </button>
 
         )}
@@ -520,8 +570,11 @@ export default function App() {
             <div className="resultado-header">
 
               <span className="resultado-status">
+
                 <span className="dot" />
-                Confirmar dados
+
+                Confirmar etiqueta
+
               </span>
 
             </div>
@@ -598,17 +651,17 @@ export default function App() {
 
             <button
               className="btn-primary"
-              onClick={guardarNoLote}
-              disabled={loading || guardado}
+              onClick={confirmarAdicionarAoLote}
+              disabled={loading || adicionado}
             >
-              {guardado ? 'Guardado no lote' : 'Confirmar e guardar no lote'}
+              {adicionado ? 'Adicionado ao lote' : 'Confirmar e adicionar ao lote'}
             </button>
 
             <button
               className="btn-secondary"
-              onClick={novaEtiqueta}
+              onClick={novaFoto}
             >
-              Ignorar e ler próxima etiqueta
+              Ignorar e ler próxima
             </button>
 
           </div>
@@ -617,38 +670,43 @@ export default function App() {
 
         {totalLote > 0 && (
 
-          <div className="actions">
+          <div className="resultado">
 
-            <a
-              href={`${API}/download-excel`}
-              target="_blank"
-              rel="noreferrer"
-              className="btn-download"
-            >
-              Exportar Excel
-            </a>
+            <div className="resultado-header">
 
-            <a
-              href={`${API}/download-csv`}
-              target="_blank"
-              rel="noreferrer"
-              className="btn-download"
-            >
-              Exportar CSV
-            </a>
+              <span className="resultado-status">
+
+                <span className="dot" />
+
+                Lote com {totalLote} etiqueta{totalLote === 1 ? '' : 's'}
+
+              </span>
+
+            </div>
+
+            <div className="actions">
+
+              <a
+                href={`${API}/download-excel`}
+                target="_blank"
+                rel="noreferrer"
+                className="btn-download"
+              >
+                Exportar Excel
+              </a>
+
+              <a
+                href={`${API}/download-csv`}
+                target="_blank"
+                rel="noreferrer"
+                className="btn-download"
+              >
+                Exportar CSV
+              </a>
+
+            </div>
 
           </div>
-
-        )}
-
-        {totalLote > 0 && (
-
-          <button
-            className="btn-danger"
-            onClick={limparLote}
-          >
-            Limpar lote
-          </button>
 
         )}
 

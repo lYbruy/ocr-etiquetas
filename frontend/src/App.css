@@ -545,3 +545,12 @@ body::before {
 .btn-danger:hover {
   background: rgba(248, 113, 113, 0.14);
 }
+
+.camera-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
