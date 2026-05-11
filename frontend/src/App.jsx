@@ -16,13 +16,15 @@ export default function App() {
   const [loading, setLoading] = useState(false)
   const [erro, setErro] = useState(null)
   const [autoStatus, setAutoStatus] = useState('Aponte para a etiqueta')
-  const [exportado, setExportado] = useState(false)
+  const [guardado, setGuardado] = useState(false)
+  const [totalLote, setTotalLote] = useState(0)
 
   const [moradaEdit, setMoradaEdit] = useState('')
   const [codigoEdit, setCodigoEdit] = useState('')
   const [cidadeEdit, setCidadeEdit] = useState('')
 
   useEffect(() => {
+    carregarResumo()
     iniciarCamera()
 
     return () => {
@@ -31,8 +33,22 @@ export default function App() {
     }
   }, [])
 
+  async function carregarResumo() {
+    try {
+      const response = await fetch(`${API}/resumo-lote`)
+      const data = await response.json()
+
+      setTotalLote(data?.total || 0)
+    } catch (e) {
+      console.error(e)
+    }
+  }
+
   async function iniciarCamera() {
     try {
+      pararAutoDetector()
+      pararCamera()
+
       setErro(null)
       setAutoStatus('A abrir câmara...')
 
@@ -47,10 +63,17 @@ export default function App() {
       if (videoRef.current) {
         videoRef.current.srcObject = stream
 
+        await videoRef.current.play().catch(() => {})
+
         videoRef.current.onloadedmetadata = () => {
           setAutoStatus('Aponte para a etiqueta')
           iniciarAutoDetector()
         }
+
+        setTimeout(() => {
+          setAutoStatus('Aponte para a etiqueta')
+          iniciarAutoDetector()
+        }, 700)
       }
     } catch (e) {
       console.error(e)
@@ -79,7 +102,7 @@ export default function App() {
 
     autoTimerRef.current = setInterval(() => {
       detectarEtiquetaECapturar()
-    }, 850)
+    }, 650)
   }
 
   function pararAutoDetector() {
@@ -103,8 +126,8 @@ export default function App() {
       return
     }
 
-    const width = 240
-    const height = 160
+    const width = 260
+    const height = 180
 
     canvas.width = width
     canvas.height = height
@@ -118,6 +141,7 @@ export default function App() {
 
     let bright = 0
     let dark = 0
+    let edges = 0
     let total = 0
 
     const startX = Math.floor(width * 0.08)
@@ -125,18 +149,25 @@ export default function App() {
     const startY = Math.floor(height * 0.12)
     const endY = Math.floor(height * 0.88)
 
-    for (let y = startY; y < endY; y += 2) {
-      for (let x = startX; x < endX; x += 2) {
+    for (let y = startY; y < endY; y += 3) {
+      for (let x = startX; x < endX; x += 3) {
         const i = (y * width + x) * 4
+        const j = (y * width + Math.min(x + 3, width - 1)) * 4
 
         const r = data[i]
         const g = data[i + 1]
         const b = data[i + 2]
 
-        const lum = (r + g + b) / 3
+        const r2 = data[j]
+        const g2 = data[j + 1]
+        const b2 = data[j + 2]
 
-        if (lum > 175) bright++
-        if (lum < 80) dark++
+        const lum = (r + g + b) / 3
+        const lum2 = (r2 + g2 + b2) / 3
+
+        if (lum > 165) bright++
+        if (lum < 95) dark++
+        if (Math.abs(lum - lum2) > 35) edges++
 
         total++
       }
@@ -144,17 +175,19 @@ export default function App() {
 
     const brightRatio = bright / total
     const darkRatio = dark / total
+    const edgeRatio = edges / total
 
     const pareceEtiqueta =
-      brightRatio > 0.28 &&
-      brightRatio < 0.88 &&
-      darkRatio > 0.015
+      brightRatio > 0.22 &&
+      brightRatio < 0.92 &&
+      darkRatio > 0.01 &&
+      edgeRatio > 0.025
 
     if (pareceEtiqueta) {
       stableCountRef.current += 1
-      setAutoStatus(`Etiqueta detectada ${stableCountRef.current}/3`)
+      setAutoStatus(`Etiqueta detectada ${stableCountRef.current}/2`)
 
-      if (stableCountRef.current >= 3) {
+      if (stableCountRef.current >= 2) {
         capturandoRef.current = true
         pararAutoDetector()
         tirarFoto(true)
@@ -169,9 +202,11 @@ export default function App() {
     setLoading(true)
     setErro(null)
     setResultado(null)
-    setExportado(false)
+    setGuardado(false)
 
     try {
+      pararAutoDetector()
+
       const video = videoRef.current
       const canvas = canvasRef.current
 
@@ -196,10 +231,7 @@ export default function App() {
         canvas.height
       )
 
-      const imageData = canvas.toDataURL(
-        'image/jpeg',
-        1
-      )
+      const imageData = canvas.toDataURL('image/jpeg', 0.92)
 
       setFoto(imageData)
       setAutoStatus(auto ? 'Foto capturada automaticamente' : 'Foto capturada')
@@ -216,27 +248,15 @@ export default function App() {
 
         const form = new FormData()
 
-        form.append(
-          'file',
-          blob,
-          'foto.jpg'
-        )
+        form.append('file', blob, 'foto.jpg')
 
         try {
-          console.log('Enviando imagem para API...')
-
-          const response = await fetch(
-            `${API}/upload`,
-            {
-              method: 'POST',
-              body: form,
-            }
-          )
+          const response = await fetch(`${API}/upload`, {
+            method: 'POST',
+            body: form,
+          })
 
           const data = await response.json().catch(() => null)
-
-          console.log('STATUS:', response.status)
-          console.log('RESPOSTA:', data)
 
           if (!response.ok) {
             throw new Error(data?.erro || `Erro HTTP ${response.status}`)
@@ -247,34 +267,44 @@ export default function App() {
           }
 
           setResultado(data)
-          setMoradaEdit(data?.morada && data.morada !== 'Não encontrada' ? data.morada : '')
-          setCodigoEdit(data?.codigo_postal && data.codigo_postal !== 'Não encontrado' ? data.codigo_postal : '')
-          setCidadeEdit(data?.cidade && data.cidade !== 'Não encontrada' ? data.cidade : '')
+
+          setMoradaEdit(
+            data?.morada && data.morada !== 'Não encontrada'
+              ? data.morada
+              : ''
+          )
+
+          setCodigoEdit(
+            data?.codigo_postal && data.codigo_postal !== 'Não encontrado'
+              ? data.codigo_postal
+              : ''
+          )
+
+          setCidadeEdit(
+            data?.cidade && data.cidade !== 'Não encontrada'
+              ? data.cidade
+              : ''
+          )
+
+          setTotalLote(data?.total_exportado || totalLote)
         } catch (e) {
           console.error(e)
-
-          setErro(
-            e.message || 'Falha ao processar a etiqueta.'
-          )
+          setErro(e.message || 'Falha ao processar a etiqueta.')
         } finally {
           setLoading(false)
           capturandoRef.current = false
         }
-      }, 'image/jpeg', 1)
+      }, 'image/jpeg', 0.92)
 
     } catch (e) {
       console.error(e)
-
-      setErro(
-        e.message || 'Erro ao tirar foto.'
-      )
-
+      setErro(e.message || 'Erro ao tirar foto.')
       setLoading(false)
       capturandoRef.current = false
     }
   }
 
-  async function confirmarExportar() {
+  async function guardarNoLote() {
     try {
       setErro(null)
       setLoading(true)
@@ -303,21 +333,26 @@ export default function App() {
         throw new Error(data.erro)
       }
 
-      setExportado(true)
+      setGuardado(true)
+      setTotalLote(data?.total_exportado || 0)
+
+      setTimeout(() => {
+        novaEtiqueta()
+      }, 700)
     } catch (e) {
       console.error(e)
-      setErro(e.message || 'Erro ao confirmar/exportar.')
+      setErro(e.message || 'Erro ao guardar no lote.')
     } finally {
       setLoading(false)
     }
   }
 
-  async function novaFoto() {
+  async function novaEtiqueta() {
     setFoto(null)
     setResultado(null)
     setErro(null)
     setLoading(false)
-    setExportado(false)
+    setGuardado(false)
     setMoradaEdit('')
     setCodigoEdit('')
     setCidadeEdit('')
@@ -325,6 +360,33 @@ export default function App() {
     stableCountRef.current = 0
 
     await iniciarCamera()
+  }
+
+  async function limparLote() {
+    const confirmar = window.confirm('Tem certeza que deseja limpar o lote atual?')
+
+    if (!confirmar) {
+      return
+    }
+
+    try {
+      setErro(null)
+
+      const response = await fetch(`${API}/limpar-lote`, {
+        method: 'POST',
+      })
+
+      const data = await response.json().catch(() => null)
+
+      if (data?.erro) {
+        throw new Error(data.erro)
+      }
+
+      setTotalLote(0)
+    } catch (e) {
+      console.error(e)
+      setErro(e.message || 'Erro ao limpar lote.')
+    }
   }
 
   const resultados = resultado?.todos_resultados || []
@@ -344,45 +406,10 @@ export default function App() {
               viewBox="0 0 20 20"
               fill="none"
             >
-              <rect
-                x="1"
-                y="1"
-                width="6"
-                height="6"
-                rx="1"
-                stroke="currentColor"
-                strokeWidth="1.5"
-              />
-
-              <rect
-                x="13"
-                y="1"
-                width="6"
-                height="6"
-                rx="1"
-                stroke="currentColor"
-                strokeWidth="1.5"
-              />
-
-              <rect
-                x="1"
-                y="13"
-                width="6"
-                height="6"
-                rx="1"
-                stroke="currentColor"
-                strokeWidth="1.5"
-              />
-
-              <rect
-                x="13"
-                y="13"
-                width="6"
-                height="6"
-                rx="1"
-                stroke="currentColor"
-                strokeWidth="1.5"
-              />
+              <rect x="1" y="1" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.5" />
+              <rect x="13" y="1" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.5" />
+              <rect x="1" y="13" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.5" />
+              <rect x="13" y="13" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.5" />
             </svg>
 
           </div>
@@ -392,10 +419,20 @@ export default function App() {
           </h1>
 
           <span className="badge">
-            v1.1
+            v1.2
           </span>
 
         </header>
+
+        <div className="lote-box">
+          <span>
+            Etiquetas guardadas no lote
+          </span>
+
+          <strong>
+            {totalLote}
+          </strong>
+        </div>
 
         <div className="viewport">
 
@@ -412,13 +449,11 @@ export default function App() {
               />
 
               <div className="overlay">
-
                 <div className="bracket tl" />
                 <div className="bracket tr" />
                 <div className="bracket bl" />
                 <div className="bracket br" />
                 <div className="scan-line" />
-
               </div>
 
               <p className="hint">
@@ -457,15 +492,8 @@ export default function App() {
 
         </div>
 
-        <canvas
-          ref={canvasRef}
-          hidden
-        />
-
-        <canvas
-          ref={detectorCanvasRef}
-          hidden
-        />
+        <canvas ref={canvasRef} hidden />
+        <canvas ref={detectorCanvasRef} hidden />
 
         {erro && (
           <p className="erro">
@@ -476,22 +504,11 @@ export default function App() {
         {!foto && (
 
           <button
-            className="btn-primary"
+            className="btn-secondary"
             onClick={() => tirarFoto(false)}
             disabled={loading}
           >
-            Tirar Foto Manualmente
-          </button>
-
-        )}
-
-        {foto && erro && !loading && (
-
-          <button
-            className="btn-secondary"
-            onClick={novaFoto}
-          >
-            Nova Foto
+            Capturar agora
           </button>
 
         )}
@@ -503,11 +520,8 @@ export default function App() {
             <div className="resultado-header">
 
               <span className="resultado-status">
-
                 <span className="dot" />
-
                 Confirmar dados
-
               </span>
 
             </div>
@@ -520,7 +534,7 @@ export default function App() {
                   className="edit-input"
                   value={moradaEdit}
                   onChange={(e) => setMoradaEdit(e.target.value)}
-                  placeholder="Ex: RUA DA IGREJA 105"
+                  placeholder="Ex: AVENIDA EUROPA Nº292"
                 />
               </label>
 
@@ -530,7 +544,7 @@ export default function App() {
                   className="edit-input mono"
                   value={codigoEdit}
                   onChange={(e) => setCodigoEdit(e.target.value)}
-                  placeholder="Ex: 3800-617"
+                  placeholder="Ex: 3800-974"
                 />
               </label>
 
@@ -584,46 +598,57 @@ export default function App() {
 
             <button
               className="btn-primary"
-              onClick={confirmarExportar}
-              disabled={loading || exportado}
+              onClick={guardarNoLote}
+              disabled={loading || guardado}
             >
-              {exportado ? 'Exportado com sucesso' : 'Confirmar e Exportar'}
+              {guardado ? 'Guardado no lote' : 'Confirmar e guardar no lote'}
             </button>
-
-            {exportado && (
-
-              <div className="actions">
-
-                <a
-                  href={`${API}/download-excel`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="btn-download"
-                >
-                  Excel
-                </a>
-
-                <a
-                  href={`${API}/download-csv`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="btn-download"
-                >
-                  CSV
-                </a>
-
-              </div>
-
-            )}
 
             <button
               className="btn-secondary"
-              onClick={novaFoto}
+              onClick={novaEtiqueta}
             >
-              Nova Foto
+              Ignorar e ler próxima etiqueta
             </button>
 
           </div>
+
+        )}
+
+        {totalLote > 0 && (
+
+          <div className="actions">
+
+            <a
+              href={`${API}/download-excel`}
+              target="_blank"
+              rel="noreferrer"
+              className="btn-download"
+            >
+              Exportar Excel
+            </a>
+
+            <a
+              href={`${API}/download-csv`}
+              target="_blank"
+              rel="noreferrer"
+              className="btn-download"
+            >
+              Exportar CSV
+            </a>
+
+          </div>
+
+        )}
+
+        {totalLote > 0 && (
+
+          <button
+            className="btn-danger"
+            onClick={limparLote}
+          >
+            Limpar lote
+          </button>
 
         )}
 
