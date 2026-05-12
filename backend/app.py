@@ -295,6 +295,8 @@ def extrair_cp_mesma_linha(linha: str) -> dict | None:
         return None
     linha_num = converter_ocr_numero(original)
     linha_num = linha_num.replace("PT-", "").replace("P-", "").replace("P ", "")
+
+    # ── Formato normal com hífen/espaço: 3800-754, 3810 974 ─────────────
     m = re.search(r"\b(3800|3810)\s*[- ]\s*(\d{3})\b", linha_num)
     if m:
         cp = f"{m.group(1)}-{m.group(2)}"
@@ -302,6 +304,18 @@ def extrair_cp_mesma_linha(linha: str) -> dict | None:
             cidade = linha_num[m.end():].strip()
             cidade = corrigir_ocr_para_morada(cidade)
             return {"codigo": cp, "cidade": cidade, "origem": "mesma_linha"}
+
+    # ── Formato compacto sem hífen: 3800754, 3810123 ─────────────────────
+    # Garante exatamente 7 dígitos (não faz parte de um número maior)
+    m_compact = re.search(r"(?<!\d)(3800|3810)(\d{3})(?!\d)", linha_num)
+    if m_compact:
+        cp = f"{m_compact.group(1)}-{m_compact.group(2)}"
+        if codigo_postal_valido(cp):
+            cidade = linha_num[m_compact.end():].strip()
+            cidade = corrigir_ocr_para_morada(cidade)
+            return {"codigo": cp, "cidade": cidade, "origem": "compacto"}
+
+    # ── 3801 com hífen → corrige para 3810 (exige contexto Aveiro) ───────
     m_3801 = re.search(r"\b3801\s*[- ]\s*(\d{3})\b", linha_num)
     if m_3801 and any(x in original for x in ["AVEIRO", "AVRO", "AVR0", "AVEI"]):
         cp = f"3810-{m_3801.group(1)}"
@@ -309,6 +323,16 @@ def extrair_cp_mesma_linha(linha: str) -> dict | None:
             cidade = linha_num[m_3801.end():].strip()
             cidade = corrigir_ocr_para_morada(cidade)
             return {"codigo": cp, "cidade": cidade, "origem": "corrigido_3801"}
+
+    # ── 3801 compacto: 3801754 → 3810-754 ───────────────────────────────
+    m_3801_compact = re.search(r"(?<!\d)3801(\d{3})(?!\d)", linha_num)
+    if m_3801_compact:
+        cp = f"3810-{m_3801_compact.group(1)}"
+        if codigo_postal_valido(cp):
+            cidade = linha_num[m_3801_compact.end():].strip()
+            cidade = corrigir_ocr_para_morada(cidade)
+            return {"codigo": cp, "cidade": cidade, "origem": "compacto_3801"}
+
     return None
 
 
@@ -495,27 +519,90 @@ def pontuar_morada(linha: str, index: int, cp_index: int) -> int:
     return score
 
 
+def _linha_quebra_bloco(linha: str) -> bool:
+    """
+    Devolve True se a linha sinaliza uma fronteira entre blocos de endereço:
+    código de barras, tracking, palavras logísticas, outro código postal, etc.
+    Usado para parar a pesquisa de morada antes de entrar noutro bloco.
+    """
+    l = linha.strip().upper()
+    if not l:
+        return True
+
+    # Sequência só de dígitos longa → código de barras / referência
+    if re.match(r"^\d{8,}$", l):
+        return True
+
+    # Código de tracking internacional (ex: PT123456789PT, LP123456789ES)
+    if re.match(r"^[A-Z]{2}\d{9,}[A-Z]{2}$", l):
+        return True
+
+    # Alfanumérico muito longo sem espaços → referência / tracking
+    if re.match(r"^[A-Z0-9]{14,}$", l):
+        return True
+
+    # Palavras logísticas que separam blocos
+    LOGISTICA = [
+        "REMITENTE", "DESTINATARIO", "DESTINATÁRIO",
+        "TIPO PORTES", "REEMBOLSO", "PAGADO", "BULTO",
+        "COD BULTO", "1DE1", "1 DE 1", "1 DE1",
+        "PESO:", "KGS", "ENVIO", "FECHA",
+        "ATT:", "EXP:", "REF:",
+    ]
+    if any(k in l for k in LOGISTICA):
+        return True
+
+    # Outro código postal (qualquer formato XXXX-XXX ou 5 dígitos espanhol)
+    # → já estamos noutro bloco de endereço
+    if re.search(r"\b\d{4}[- ]\d{3}\b", l):
+        return True
+    if re.search(r"(?<!\d)\d{5}(?!\d)", l) and not re.search(r"\b\d{4}[- ]\d{3}\b", l):
+        return True
+
+    return False
+
+
 def encontrar_morada_para_codigo(linhas: list[str], cp_info: dict) -> str:
+    """
+    Procura a morada que pertence ao MESMO bloco de endereço que o código postal.
+    Caminha para trás a partir da linha do CP e para assim que encontra
+    uma fronteira de bloco (barcode, tracking, outro CP, palavras logísticas).
+    Só aceita moradas portuguesas.
+    """
     cp_index = cp_info["linha_index"]
     candidatos = []
-    inicio = max(0, cp_index - 12)
-    fim    = min(len(linhas), cp_index + 3)
 
-    for i in range(inicio, fim):
-        linha = limpar_linha(corrigir_ocr_para_morada(linhas[i]))
+    # ── Caminhada para trás a partir do CP ──────────────────────────────
+    for i in range(cp_index - 1, max(-1, cp_index - 10), -1):
+        linha_raw = linhas[i].strip()
+        linha     = limpar_linha(corrigir_ocr_para_morada(linha_raw))
 
-        # Rejeita imediatamente se for morada não-portuguesa
+        # Fronteira de bloco → para de procurar
+        if _linha_quebra_bloco(linha_raw):
+            break
+
+        # Morada de outro país → ignora mas continua (pode ser só uma linha solta)
         if eh_morada_nao_portugal(linha):
             continue
 
         if eh_morada_valida(linha):
             score = pontuar_morada(linha, i, cp_index)
-            if score > 0:  # só adiciona candidatos com pontuação positiva
-                candidatos.append({
-                    "linha": linha,
-                    "score": score,
-                    "index": i,
-                })
+            if score > 0:
+                candidatos.append({"linha": linha, "score": score, "index": i})
+
+    # ── Fallback: janela mais larga se não encontrou nada no bloco ───────
+    # (etiquetas com OCR desordenado onde o bloco não é contíguo)
+    if not candidatos:
+        inicio = max(0, cp_index - 12)
+        for i in range(inicio, cp_index):
+            linha_raw = linhas[i].strip()
+            linha     = limpar_linha(corrigir_ocr_para_morada(linha_raw))
+            if eh_morada_nao_portugal(linha):
+                continue
+            if eh_morada_valida(linha):
+                score = pontuar_morada(linha, i, cp_index)
+                if score > 0:
+                    candidatos.append({"linha": linha, "score": score, "index": i})
 
     if not candidatos:
         return ""
