@@ -34,6 +34,42 @@ LOCALIDADES_AVEIRO = [
 ]
 
 # =========================
+# PALAVRAS/CIDADES NÃO-PORTUGAL
+# Usadas para rejeitar moradas espanholas ou de outros países
+# =========================
+
+PALAVRAS_NAO_PORTUGAL = [
+    "SPAIN", "ESPAÑA", "ESPANA", "ESPANHA",
+    "CALLE ", "CALLE,", " C/ ", "C/.", " CL ",
+    "PLAZA ", "PASEO ", "PASE0 ", "CARRER ",
+    "AVDA.", "AVDA ", "POL. ", "POL,",
+    "POLIGONO", "POLÍGONO",
+    "NAVE ", "PARCELA ",
+    "P.O. BOX", "APARTADO DE CORREOS",
+    "GERMANY", "FRANCE", "ITALIA", "ITALIA",
+    "UNITED KINGDOM", "NEDERLAND", "BELGIQUE",
+]
+
+CIDADES_NAO_PORTUGAL = [
+    "MADRID", "BARCELONA", "VALENCIA", "SEVILLA", "ZARAGOZA",
+    "MALAGA", "MURCIA", "BILBAO", "ALICANTE", "CORDOBA",
+    "VALLADOLID", "VIGO", "GIJON", "VITORIA", "GRANADA",
+    "ELCHE", "OVIEDO", "BADALONA", "CARTAGENA", "TERRASSA",
+    "SABADELL", "JEREZ", "MOSTOLES", "LEGANES", "BURGOS",
+    "SANTANDER", "FUENLABRADA", "ALMERIA", "ALCALA", "PAMPLONA",
+    "CADIZ", "SALAMANCA", "TOLEDO", "HUELVA", "BADAJOZ",
+    "LOGRONO", "TARRAGONA", "LLEIDA", "GIRONA", "ALBACETE",
+    "BERLIN", "PARIS", "LONDON", "ROMA", "AMSTERDAM",
+    "BRUSSELS", "LISBOA",  # Lisboa não é Aveiro — fora do filtro
+]
+
+# Prefixos de CP espanhóis (2 primeiros dígitos)
+# Espanha usa CPs de 5 dígitos: 01000–52999
+PREFIXOS_CP_ESPANHA = set(
+    f"{n:02d}" for n in range(1, 53)
+)
+
+# =========================
 # FASTAPI
 # =========================
 
@@ -57,10 +93,10 @@ os.makedirs("exports", exist_ok=True)
 # MEMÓRIA DO LOTE
 # =========================
 
-ocr_engine       = None
+ocr_engine        = None
 uploads_pendentes = {}
-lote_confirmado  = []
-executor         = ThreadPoolExecutor(max_workers=3)
+lote_confirmado   = []
+executor          = ThreadPoolExecutor(max_workers=3)
 
 # =========================
 # OCR GLOBAL — pré-aquecido no startup
@@ -88,7 +124,6 @@ async def startup_event():
     try:
         print("Pré-aquecendo OCR...", flush=True)
         engine = get_ocr()
-        # Imagem em branco apenas para inicializar os modelos internos
         dummy = np.ones((100, 300, 3), dtype=np.uint8) * 255
         dummy_path = "uploads/_warmup.jpg"
         cv2.imwrite(dummy_path, dummy)
@@ -105,11 +140,11 @@ async def startup_event():
 # =========================
 
 class ConfirmarPayload(BaseModel):
-    upload_id:    str | None = None
-    morada:       str
+    upload_id:     str | None = None
+    morada:        str
     codigo_postal: str
-    cidade:       str | None = ""
-    texto_ocr:    str | None = ""
+    cidade:        str | None = ""
+    texto_ocr:     str | None = ""
 
 
 # =========================
@@ -118,7 +153,7 @@ class ConfirmarPayload(BaseModel):
 
 @app.get("/")
 async def home():
-    return {"status": "online", "message": "API OCR funcionando", "filtro": "Somente códigos postais 3800 e 3810"}
+    return {"status": "online", "message": "API OCR funcionando", "filtro": "Somente códigos postais 3800 e 3810 — moradas Portugal"}
 
 @app.get("/health")
 async def health():
@@ -281,7 +316,7 @@ def extrair_cp_partido(linhas: list[str], i: int) -> dict | None:
     linha = linhas[i].strip()
     if linha_tem_lixo_para_cp(linha):
         return None
-    linha_num  = converter_ocr_numero(linha)
+    linha_num   = converter_ocr_numero(linha)
     linha_limpa = re.sub(r"[^0-9]", "", linha_num)
     if linha_limpa not in ["3800", "3810", "3801"]:
         return None
@@ -316,10 +351,10 @@ def extrair_codigos_postais_aveiro(linhas: list[str]) -> list[dict]:
                 if eh_linha_cidade(prox):
                     cidade = prox
             encontrados.append({
-                "codigo": mesmo["codigo"],
+                "codigo":      mesmo["codigo"],
                 "linha_index": i,
-                "cidade": limpar_linha(corrigir_ocr_para_morada(cidade)),
-                "origem": mesmo.get("origem", "mesma_linha"),
+                "cidade":      limpar_linha(corrigir_ocr_para_morada(cidade)),
+                "origem":      mesmo.get("origem", "mesma_linha"),
             })
         partido = extrair_cp_partido(linhas, i)
         if partido:
@@ -332,6 +367,56 @@ def extrair_codigos_postais_aveiro(linhas: list[str]) -> list[dict]:
             vistos.add(chave)
             unicos.append(item)
     return unicos
+
+
+# =========================
+# DETEÇÃO DE MORADAS NÃO-PORTUGUESAS
+# =========================
+
+def eh_morada_nao_portugal(linha: str) -> bool:
+    """
+    Retorna True se a linha contém indicadores claros de morada
+    não-portuguesa (espanhola, alemã, francesa, etc.).
+    Essas linhas são EXCLUÍDAS do candidato a morada.
+    """
+    l = corrigir_ocr_para_morada(str(linha)).upper()
+
+    # Palavras-chave de países / tipos de via estrangeiros
+    if any(p in l for p in PALAVRAS_NAO_PORTUGAL):
+        return True
+
+    # Cidades estrangeiras conhecidas
+    for cidade in CIDADES_NAO_PORTUGAL:
+        # Match de palavra completa para evitar falsos positivos
+        if re.search(r"\b" + re.escape(cidade) + r"\b", l):
+            return True
+
+    # Código postal espanhol: 5 dígitos isolados (sem hífen português XXXX-XXX)
+    # e que NÃO sejam um prefixo português de 4 dígitos seguido de qualquer coisa
+    if not re.search(r"\b\d{4}-\d{3}\b", l):
+        m5 = re.search(r"\b(\d{5})\b", l)
+        if m5:
+            cp5 = m5.group(1)
+            # CPs espanhóis: 01000-52999 (primeiros 2 dígitos entre 01 e 52)
+            prefixo2 = cp5[:2]
+            if prefixo2 in PREFIXOS_CP_ESPANHA:
+                return True
+
+    return False
+
+
+def tem_contexto_portugal(linhas: list[str], cp_index: int, janela: int = 6) -> bool:
+    """
+    Verifica se há indicadores de Portugal num raio de 'janela' linhas
+    em torno do código postal.
+    """
+    inicio = max(0, cp_index - janela)
+    fim    = min(len(linhas), cp_index + janela + 1)
+    bloco  = " ".join(linhas[inicio:fim]).upper()
+    indicadores = ["PORTUGAL", "AVEIRO", "CACIA", "ESGUEIRA", "ARADAS",
+                   "GLORIA", "VERA CRUZ", "SANTA JOANA", "SAO BERNARDO",
+                   "OLIVEIRINHA", "EIXO", "EIROL", "NARIZ", "REQUEIXO"]
+    return any(ind in bloco for ind in indicadores)
 
 
 # =========================
@@ -371,6 +456,11 @@ def eh_morada_valida(linha: str) -> bool:
 def pontuar_morada(linha: str, index: int, cp_index: int) -> int:
     l = corrigir_ocr_para_morada(linha).upper()
     score = 0
+
+    # ── Penalidade máxima para moradas não-portuguesas ──────────────────
+    if eh_morada_nao_portugal(linha):
+        return -9999  # elimina este candidato completamente
+
     if eh_morada_valida(linha):
         score += 150
     if "AVENIDA" in l or "AV." in l:
@@ -387,14 +477,21 @@ def pontuar_morada(linha: str, index: int, cp_index: int) -> int:
         score += 18
     if re.search(r"\d", l):
         score += 20
+
+    # ── Bónus de proximidade ao CP ──────────────────────────────────────
     distancia = abs(cp_index - index)
     score += max(0, 70 - distancia * 10)
     if index < cp_index:
-        score += 30
+        score += 30   # bónus: morada antes do CP (padrão normal)
     if index > cp_index:
         score -= 20
     if index < cp_index - 8:
         score -= 35
+
+    # ── Bónus por contexto de localidade de Aveiro ──────────────────────
+    if texto_tem_localidade_aveiro(l):
+        score += 40
+
     return score
 
 
@@ -403,16 +500,26 @@ def encontrar_morada_para_codigo(linhas: list[str], cp_info: dict) -> str:
     candidatos = []
     inicio = max(0, cp_index - 12)
     fim    = min(len(linhas), cp_index + 3)
+
     for i in range(inicio, fim):
         linha = limpar_linha(corrigir_ocr_para_morada(linhas[i]))
+
+        # Rejeita imediatamente se for morada não-portuguesa
+        if eh_morada_nao_portugal(linha):
+            continue
+
         if eh_morada_valida(linha):
-            candidatos.append({
-                "linha": linha,
-                "score": pontuar_morada(linha, i, cp_index),
-                "index": i,
-            })
+            score = pontuar_morada(linha, i, cp_index)
+            if score > 0:  # só adiciona candidatos com pontuação positiva
+                candidatos.append({
+                    "linha": linha,
+                    "score": score,
+                    "index": i,
+                })
+
     if not candidatos:
         return ""
+
     candidatos.sort(key=lambda x: x["score"], reverse=True)
     return candidatos[0]["linha"]
 
@@ -423,12 +530,15 @@ def pontuar_resultado(resultado: dict) -> int:
     codigo   = resultado.get("codigo_postal", "")
     cidade   = resultado.get("cidade", "")
     contexto = resultado.get("contexto", "")
+
     if codigo_postal_valido(codigo):
         score += 200
     if morada and morada != "Não encontrada":
         score += 150
     if eh_morada_valida(morada):
         score += 70
+    if eh_morada_nao_portugal(morada):
+        score -= 9999  # invalida resultado com morada estrangeira
     if cidade and cidade != "Não encontrada":
         score += 30
     if texto_tem_localidade_aveiro(cidade):
@@ -436,14 +546,24 @@ def pontuar_resultado(resultado: dict) -> int:
     if texto_tem_localidade_aveiro(contexto):
         score += 45
     score += int(resultado.get("linha_codigo_index", 0)) * 2
+
     texto_contexto = contexto.upper()
     if any(x in texto_contexto for x in ["R-", "SN1", "PALPITE", "ATT:", "OBS", "EXP:", "REF:", "BULTO"]):
         score -= 70
+
     return score
 
 
 def escolher_destinatario(resultados: list[dict]) -> dict | None:
-    validos = [r for r in resultados if codigo_postal_valido(r["codigo_postal"])]
+    validos = [
+        r for r in resultados
+        if codigo_postal_valido(r["codigo_postal"])
+        and r.get("morada", "Não encontrada") != "Não encontrada"
+        and not eh_morada_nao_portugal(r.get("morada", ""))
+    ]
+    if not validos:
+        # fallback: aceita sem morada confirmada se o CP for válido
+        validos = [r for r in resultados if codigo_postal_valido(r["codigo_postal"])]
     if not validos:
         return None
     validos.sort(key=lambda x: x["score"], reverse=True)
@@ -455,56 +575,61 @@ def extrair_dados_aveiro(texto: str) -> dict:
     linhas = [l.strip() for l in texto.split("\n") if l.strip()]
     cps    = extrair_codigos_postais_aveiro(linhas)
     resultados = []
+
     for cp in cps:
         if not codigo_postal_valido(cp["codigo"]):
             continue
+
         morada = encontrar_morada_para_codigo(linhas, cp)
         cidade = corrigir_ocr_para_morada(cp.get("cidade", ""))
         idx    = cp["linha_index"]
+
         contexto_inicio = max(0, idx - 5)
         contexto_fim    = min(len(linhas), idx + 5)
         contexto = "\n".join(linhas[contexto_inicio:contexto_fim])
+
         item = {
-            "morada":            morada if morada else "Não encontrada",
-            "codigo_postal":     cp["codigo"],
-            "cidade":            cidade if cidade else "Não encontrada",
+            "morada":             morada if morada else "Não encontrada",
+            "codigo_postal":      cp["codigo"],
+            "cidade":             cidade if cidade else "Não encontrada",
             "linha_codigo_index": idx,
-            "origem_codigo":     cp.get("origem", ""),
-            "contexto":          contexto,
+            "origem_codigo":      cp.get("origem", ""),
+            "contexto":           contexto,
         }
         item["score"] = pontuar_resultado(item)
         resultados.append(item)
+
     resultados.sort(key=lambda x: x["score"], reverse=True)
     escolhido = escolher_destinatario(resultados)
+
     if escolhido:
         return {
-            "morada":         escolhido["morada"],
-            "codigo_postal":  escolhido["codigo_postal"],
-            "cidade":         escolhido["cidade"],
+            "morada":           escolhido["morada"],
+            "codigo_postal":    escolhido["codigo_postal"],
+            "cidade":           escolhido["cidade"],
             "todos_resultados": resultados,
         }
+
     return {
-        "morada":         "Não encontrada",
-        "codigo_postal":  "Não encontrado",
-        "cidade":         "Não encontrada",
+        "morada":           "Não encontrada",
+        "codigo_postal":    "Não encontrado",
+        "cidade":           "Não encontrada",
         "todos_resultados": resultados,
     }
 
 
 # =========================
-# IMAGEM — versões otimizadas
+# IMAGEM — versões otimizadas  (NÃO MODIFICADO)
 # =========================
 
 def pre_processar_imagem(img: np.ndarray) -> np.ndarray:
     """Melhora contraste e nitidez para OCR mais preciso."""
-    # Redimensiona se muito grande (OCR não precisa de 4K)
     h, w = img.shape[:2]
     max_dim = 1600
     if max(h, w) > max_dim:
         scale = max_dim / max(h, w)
         img = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
 
-    # CLAHE para melhorar contraste local
     lab  = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(lab)
     clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
@@ -520,27 +645,23 @@ def criar_versoes_imagem(caminho: str) -> list[str]:
     if img is None:
         return [caminho]
 
-    base   = str(uuid.uuid4())
+    base    = str(uuid.uuid4())
     versoes = []
 
-    # Versão 1: original pré-processada (contraste melhorado)
-    img_proc = pre_processar_imagem(img.copy())
+    img_proc  = pre_processar_imagem(img.copy())
     proc_path = f"uploads/proc_{base}.jpg"
     cv2.imwrite(proc_path, img_proc, [cv2.IMWRITE_JPEG_QUALITY, 95])
     versoes.append(proc_path)
 
-    # Versão 2: tons de cinza com equalização adaptativa
     gray = cv2.cvtColor(img_proc, cv2.COLOR_BGR2GRAY)
     clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
     gray  = clahe.apply(gray)
-    # Nitidez extra
     kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
     gray   = cv2.filter2D(gray, -1, kernel)
     gray_path = f"uploads/gray_{base}.jpg"
     cv2.imwrite(gray_path, gray, [cv2.IMWRITE_JPEG_QUALITY, 95])
     versoes.append(gray_path)
 
-    # Versão 3: binarização adaptativa (ótima para etiquetas com fundo claro)
     blur   = cv2.GaussianBlur(gray, (3, 3), 0)
     binary = cv2.adaptiveThreshold(
         blur, 255,
@@ -555,7 +676,7 @@ def criar_versoes_imagem(caminho: str) -> list[str]:
 
 
 # =========================
-# OCR PARSER
+# OCR PARSER  (NÃO MODIFICADO)
 # =========================
 
 def extrair_texto_resultado_ocr(resultado) -> str:
@@ -630,7 +751,7 @@ def rodar_ocr_em_versoes(versoes: list[str]) -> str:
     """
     Corre OCR em cada versão de forma sequencial mas com early-exit:
     se a primeira versão já deu um bom resultado (CP válido + morada),
-    não processa as restantes — reduz o tempo pela metade na maioria dos casos.
+    não processa as restantes.
     """
     textos = []
 
@@ -642,7 +763,6 @@ def rodar_ocr_em_versoes(versoes: list[str]) -> str:
             print(f"Texto versão {i+1}:\n{texto}", flush=True)
             textos.append(texto)
 
-            # Early-exit: se já temos CP + morada, não precisamos das outras versões
             texto_combinado = juntar_textos_unicos(textos)
             if resultado_tem_cp_valido(texto_combinado):
                 dados = extrair_dados_aveiro(texto_combinado)
@@ -664,29 +784,18 @@ def gerar_dataframe_lote():
 
 def salvar_lote_em_arquivos():
     df = gerar_dataframe_lote()
-
-    # Sempre recria o Excel/CSV do zero.
-    # Assim nunca mistura exportações antigas.
     df.to_excel(EXPORT_EXCEL, index=False)
     df.to_csv(EXPORT_CSV, index=False)
 
 
 def limpar_lote_depois_exportar():
-    """
-    Limpa tudo depois de exportar.
-    A próxima exportação começa do zero.
-    """
-
     lote_confirmado.clear()
     uploads_pendentes.clear()
-
     try:
         if os.path.exists(EXPORT_EXCEL):
             os.remove(EXPORT_EXCEL)
-
         if os.path.exists(EXPORT_CSV):
             os.remove(EXPORT_CSV)
-
     except Exception:
         pass
 
@@ -729,26 +838,26 @@ async def upload(file: UploadFile = File(...)):
         cidade = dados_extraidos["cidade"]
 
         uploads_pendentes[upload_id] = {
-            "morada":         morada,
-            "codigo_postal":  codigo,
-            "cidade":         cidade,
-            "texto_ocr":      texto,
+            "morada":           morada,
+            "codigo_postal":    codigo,
+            "cidade":           cidade,
+            "texto_ocr":        texto,
             "todos_resultados": dados_extraidos["todos_resultados"],
         }
 
         print(f"\nID: {upload_id} | Morada: {morada} | CP: {codigo} | Cidade: {cidade}", flush=True)
 
         return {
-            "status":          "aguardando_confirmacao",
-            "mensagem":        "Confirme ou edite os dados antes de adicionar ao lote.",
-            "upload_id":       upload_id,
-            "morada":          morada,
-            "codigo_postal":   codigo,
-            "cidade":          cidade,
-            "texto_ocr":       texto if texto else "Nenhum texto encontrado",
+            "status":           "aguardando_confirmacao",
+            "mensagem":         "Confirme ou edite os dados antes de adicionar ao lote.",
+            "upload_id":        upload_id,
+            "morada":           morada,
+            "codigo_postal":    codigo,
+            "cidade":           cidade,
+            "texto_ocr":        texto if texto else "Nenhum texto encontrado",
             "todos_resultados": dados_extraidos["todos_resultados"],
-            "total_lote":      len(lote_confirmado),
-            "filtro":          "Somente códigos postais 3800 e 3810",
+            "total_lote":       len(lote_confirmado),
+            "filtro":           "Somente códigos postais 3800 e 3810 — moradas Portugal",
         }
 
     except Exception as e:
@@ -788,11 +897,14 @@ async def confirmar(payload: ConfirmarPayload):
         if not morada or morada == "Não encontrada":
             return {"erro": "Morada vazia. Confirme ou escreva a morada correta."}
 
+        if eh_morada_nao_portugal(morada):
+            return {"erro": "A morada indicada não parece ser portuguesa. Por favor, verifique."}
+
         lote_confirmado.append({
-            "Morada":         morada,
-            "Código Postal":  codigo,
-            "Cidade":         cidade,
-            "Texto OCR":      texto_ocr,
+            "Morada":        morada,
+            "Código Postal": codigo,
+            "Cidade":        cidade,
+            "Texto OCR":     texto_ocr,
         })
         salvar_lote_em_arquivos()
 
@@ -800,11 +912,11 @@ async def confirmar(payload: ConfirmarPayload):
             del uploads_pendentes[payload.upload_id]
 
         return {
-            "status":       "adicionado_ao_lote",
-            "morada":       morada,
+            "status":        "adicionado_ao_lote",
+            "morada":        morada,
             "codigo_postal": codigo,
-            "cidade":       cidade,
-            "total_lote":   len(lote_confirmado),
+            "cidade":        cidade,
+            "total_lote":    len(lote_confirmado),
         }
 
     except Exception as e:
@@ -843,7 +955,6 @@ async def limpar_lote():
 @app.get("/download-excel")
 async def download_excel():
     salvar_lote_em_arquivos()
-
     return FileResponse(
         path=EXPORT_EXCEL,
         filename="resultado.xlsx",
@@ -854,7 +965,6 @@ async def download_excel():
 @app.get("/download-csv")
 async def download_csv():
     salvar_lote_em_arquivos()
-
     return FileResponse(
         path=EXPORT_CSV,
         filename="resultado.csv",
