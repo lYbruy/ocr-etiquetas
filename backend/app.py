@@ -1,6 +1,7 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 from pydantic import BaseModel
 
 import os
@@ -663,8 +664,31 @@ def gerar_dataframe_lote():
 
 def salvar_lote_em_arquivos():
     df = gerar_dataframe_lote()
+
+    # Sempre recria o Excel/CSV do zero.
+    # Assim nunca mistura exportações antigas.
     df.to_excel(EXPORT_EXCEL, index=False)
     df.to_csv(EXPORT_CSV, index=False)
+
+
+def limpar_lote_depois_exportar():
+    """
+    Limpa tudo depois de exportar.
+    A próxima exportação começa do zero.
+    """
+
+    lote_confirmado.clear()
+    uploads_pendentes.clear()
+
+    try:
+        if os.path.exists(EXPORT_EXCEL):
+            os.remove(EXPORT_EXCEL)
+
+        if os.path.exists(EXPORT_CSV):
+            os.remove(EXPORT_CSV)
+
+    except Exception:
+        pass
 
 
 # =========================
@@ -818,13 +842,21 @@ async def limpar_lote():
 
 @app.get("/download-excel")
 async def download_excel():
-    if not os.path.exists(EXPORT_EXCEL):
-        salvar_lote_em_arquivos()
-    return FileResponse(path=EXPORT_EXCEL, filename="resultado.xlsx")
+    salvar_lote_em_arquivos()
+
+    return FileResponse(
+        path=EXPORT_EXCEL,
+        filename="resultado.xlsx",
+        background=BackgroundTask(limpar_lote_depois_exportar)
+    )
 
 
 @app.get("/download-csv")
 async def download_csv():
-    if not os.path.exists(EXPORT_CSV):
-        salvar_lote_em_arquivos()
-    return FileResponse(path=EXPORT_CSV, filename="resultado.csv")
+    salvar_lote_em_arquivos()
+
+    return FileResponse(
+        path=EXPORT_CSV,
+        filename="resultado.csv",
+        background=BackgroundTask(limpar_lote_depois_exportar)
+    )
