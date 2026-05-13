@@ -587,4 +587,14 @@ body::before {
   .actions {
     grid-template-columns: 1fr;
   }
+
+  .btn-download {
+  cursor: pointer;
+  border: 1px solid var(--border-2);
+}
+
+.btn-download:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
 }

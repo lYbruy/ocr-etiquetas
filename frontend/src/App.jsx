@@ -53,17 +53,18 @@ export default function App() {
   }
 
   async function iniciarSistema() {
-    await limparLoteInicial()
+    await atualizarResumoLote()
     await iniciarCamera()
   }
 
-  async function limparLoteInicial() {
+  async function atualizarResumoLote() {
     try {
-      await fetch(`${API}/limpar-lote`, {
-        method: 'POST',
-      })
+      const response = await fetch(`${API}/resumo-lote`)
+      const data = await response.json().catch(() => null)
 
-      setTotalLote(0)
+      if (data?.total !== undefined) {
+        setTotalLote(data.total)
+      }
     } catch (e) {
       console.error(e)
     }
@@ -139,7 +140,7 @@ export default function App() {
 
     autoTimerRef.current = setInterval(() => {
       detectarEtiquetaECapturar()
-    }, 650)
+    }, 750)
   }
 
   function pararAutoDetector() {
@@ -151,7 +152,7 @@ export default function App() {
     stableCountRef.current = 0
   }
 
-  function ativarCooldown(ms = 1200) {
+  function ativarCooldown(ms = 1400) {
     cooldownRef.current = true
 
     setTimeout(() => {
@@ -299,7 +300,7 @@ export default function App() {
 
       const imageData = canvas.toDataURL(
         'image/jpeg',
-        0.92
+        0.9
       )
 
       atualizarFoto(imageData)
@@ -361,6 +362,7 @@ export default function App() {
           )
 
           setAutoStatus('Confirme os dados encontrados')
+          await atualizarResumoLote()
         } catch (e) {
           console.error(e)
 
@@ -373,7 +375,7 @@ export default function App() {
           atualizarLoading(false)
           capturandoRef.current = false
         }
-      }, 'image/jpeg', 0.92)
+      }, 'image/jpeg', 0.9)
 
     } catch (e) {
       console.error(e)
@@ -425,6 +427,7 @@ export default function App() {
 
       setAdicionado(true)
       setTotalLote(data?.total_lote || 0)
+      await atualizarResumoLote()
 
       setTimeout(() => {
         proximaEtiqueta()
@@ -452,7 +455,7 @@ export default function App() {
     capturandoRef.current = false
     stableCountRef.current = 0
 
-    ativarCooldown(1200)
+    ativarCooldown(1400)
     setAutoStatus('Aponte para a próxima etiqueta')
 
     if (!videoRef.current?.srcObject) {
@@ -460,6 +463,8 @@ export default function App() {
     } else {
       iniciarAutoDetector()
     }
+
+    await atualizarResumoLote()
   }
 
   async function limparTudo() {
@@ -482,6 +487,45 @@ export default function App() {
     } catch (e) {
       console.error(e)
       setErro(e.message || 'Erro ao limpar lote.')
+    } finally {
+      atualizarLoading(false)
+    }
+  }
+
+  async function baixarArquivo(tipo) {
+    try {
+      if (totalLote === 0 || loading) {
+        return
+      }
+
+      setErro(null)
+      atualizarLoading(true)
+
+      const endpoint = tipo === 'excel' ? 'download-excel' : 'download-csv'
+      const filename = tipo === 'excel' ? 'resultado.xlsx' : 'resultado.csv'
+
+      const response = await fetch(`${API}/${endpoint}`)
+
+      if (!response.ok) {
+        throw new Error(`Erro ao exportar ${tipo === 'excel' ? 'Excel' : 'CSV'}.`)
+      }
+
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+
+      window.URL.revokeObjectURL(url)
+
+      await atualizarResumoLote()
+    } catch (e) {
+      console.error(e)
+      setErro(e.message || 'Erro ao exportar ficheiro.')
     } finally {
       atualizarLoading(false)
     }
@@ -547,7 +591,7 @@ export default function App() {
           </h1>
 
           <span className="badge">
-            v2.2
+            v2.3
           </span>
         </header>
 
@@ -723,23 +767,23 @@ export default function App() {
         )}
 
         <div className="actions">
-          <a
-            href={`${API}/download-excel`}
-            target="_blank"
-            rel="noreferrer"
+          <button
+            type="button"
+            onClick={() => baixarArquivo('excel')}
             className={`btn-download ${totalLote === 0 ? 'disabled-link' : ''}`}
+            disabled={loading || totalLote === 0}
           >
             Exportar Excel
-          </a>
+          </button>
 
-          <a
-            href={`${API}/download-csv`}
-            target="_blank"
-            rel="noreferrer"
+          <button
+            type="button"
+            onClick={() => baixarArquivo('csv')}
             className={`btn-download ${totalLote === 0 ? 'disabled-link' : ''}`}
+            disabled={loading || totalLote === 0}
           >
             Exportar CSV
-          </a>
+          </button>
         </div>
 
         <button

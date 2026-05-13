@@ -32,7 +32,8 @@ EXPORT_EXCEL = "exports/resultado.xlsx"
 EXPORT_CSV = "exports/resultado.csv"
 
 GEOCODER_ENABLED = os.getenv("GEOCODER_ENABLED", "true").lower() == "true"
-GEOCODER_TIMEOUT = int(os.getenv("GEOCODER_TIMEOUT", "5"))
+GEOCODER_TIMEOUT = float(os.getenv("GEOCODER_TIMEOUT", "1.5"))
+GEOCODER_STRICT = os.getenv("GEOCODER_STRICT", "false").lower() == "true"
 GEOCODER_USER_AGENT = os.getenv(
     "GEOCODER_USER_AGENT",
     "ocr-etiquetas-aveiro/1.0"
@@ -146,7 +147,6 @@ def get_ocr():
 async def startup_event():
     try:
         limpar_pasta_exports()
-        lote_confirmado.clear()
         uploads_pendentes.clear()
 
         print("Pré-aquecendo OCR...", flush=True)
@@ -178,6 +178,9 @@ async def home():
         "status": "online",
         "message": "API OCR funcionando",
         "filtro": "Somente códigos postais 3800 e 3810 — moradas Portugal/Aveiro",
+        "geocoder_enabled": GEOCODER_ENABLED,
+        "geocoder_timeout": GEOCODER_TIMEOUT,
+        "geocoder_strict": GEOCODER_STRICT,
     }
 
 
@@ -235,6 +238,10 @@ def corrigir_ocr_para_morada(texto: str) -> str:
         "AYARO": "AVEIRO",
         "AVERO": "AVEIRO",
         "AVE1R0": "AVEIRO",
+        "E56UEIRA": "ESGUEIRA",
+        "ESGUERA": "ESGUEIRA",
+        "ESGUSA": "ESGUEIRA",
+        "ESGUELSA": "ESGUEIRA",
         "PORTUGA": "PORTUGAL",
         "POR TUGAL": "PORTUGAL",
         "PORTUGALO.C": "PORTUGAL O.C",
@@ -268,7 +275,7 @@ def corrigir_ocr_para_morada(texto: str) -> str:
         texto = texto.replace(errado, certo)
 
     texto = re.sub(
-        r"\b(AVENIDA|RUA|ALAMEDA|TRAVESSA|ESTRADA|CAMINHO|LARGO|PRAÇA|PRACA)\s*([A-ZÁÀÂÃÉÈÊÍÌÓÒÔÕÚÙÇ ]+?)N[º°]?\s*(\d+)",
+        r"\b(AVENIDA|RUA|ALAMEDA|TRAVESSA|ESTRADA|CAMINHO|LARGO|PRAÇA|PRACA|PRACETA)\s*([A-ZÁÀÂÃÉÈÊÍÌÓÒÔÕÚÙÇ ]+?)N[º°]?\s*(\d+)",
         r"\1 \2 Nº\3",
         texto,
         flags=re.IGNORECASE,
@@ -294,6 +301,7 @@ def normalizar_morada_extraida(morada: str) -> str:
         "REP0BLICA": "REPUBLICA",
         "REPÚBLICA": "REPUBLICA",
         "REPOBLICA": "REPUBLICA",
+
         "D REPUBLICA": "DA REPUBLICA",
         "DAREPUBLICA": "DA REPUBLICA",
         "DA REP0BLICA": "DA REPUBLICA",
@@ -307,9 +315,30 @@ def normalizar_morada_extraida(morada: str) -> str:
         "RUA DAREPUBLICA": "RUA DA REPUBLICA",
         "RUA DAREP0BLICA": "RUA DA REPUBLICA",
         "RUA DAREPOBLICA": "RUA DA REPUBLICA",
+
+        "TRAVESSADO": "TRAVESSA DO",
+        "TRAVESSAD0": "TRAVESSA DO",
+        "TRAVESSA D0": "TRAVESSA DO",
+        "TRAVESSA0": "TRAVESSA DO",
+        "TRAVESSA DO": "TRAVESSA DO",
+        "TRAVESSA D": "TRAVESSA DO",
+
+        "MILAO": "MILÃO",
+        "MIL4O": "MILÃO",
+        "M1LAO": "MILÃO",
+
+        "SANTARI0S": "SANITÁRIOS",
+        "SANTARIOS": "SANITÁRIOS",
+        "SANITARIOS": "SANITÁRIOS",
+
+        "SIOML": "SEIXAL",
+        "SEI XAL": "SEIXAL",
+        "SEIX0L": "SEIXAL",
+
         "PCT DARUADA": "PCT DA RUA DA",
         "PCT DA RUA": "PRACETA DA RUA",
         "PCT": "PRACETA",
+
         " NR ": " Nº ",
         " NR": " Nº",
         " N ": " Nº ",
@@ -396,7 +425,7 @@ def linha_tem_lixo_para_cp(linha: str) -> bool:
 
 
 # =========================
-# DETEÇÃO DE MORADAS NÃO-PORTUGUESAS
+# MORADAS NÃO-PORTUGUESAS
 # =========================
 
 def eh_morada_nao_portugal(linha: str) -> bool:
@@ -423,7 +452,7 @@ def eh_morada_nao_portugal(linha: str) -> bool:
 
 
 # =========================
-# VALIDAÇÃO ONLINE
+# GEOCODER
 # =========================
 
 def validar_morada_online(morada: str, codigo_postal: str) -> dict:
@@ -500,9 +529,10 @@ def validar_morada_online(morada: str, codigo_postal: str) -> dict:
             bate_pais = country_code == "pt" or "PORTUGAL" in display
             bate_aveiro = "AVEIRO" in display or "AVEIRO" in city
             bate_cp = (
-                postcode.startswith("3800")
-                or postcode.startswith("3810")
+                postcode.startswith(codigo_postal[:4])
                 or codigo_postal[:4] in display
+                or postcode.startswith("3800")
+                or postcode.startswith("3810")
             )
 
             if bate_pais and bate_aveiro and bate_cp:
@@ -514,6 +544,10 @@ def validar_morada_online(morada: str, codigo_postal: str) -> dict:
         resultado["motivo"] = "resultado_nao_bate_aveiro_cp"
         resultado["display_name"] = dados[0].get("display_name", "")
 
+        return resultado
+
+    except requests.exceptions.Timeout:
+        resultado["motivo"] = "timeout_geocoder"
         return resultado
 
     except Exception as e:
@@ -1082,20 +1116,31 @@ def extrair_dados_aveiro(texto: str) -> dict:
         }
 
         item["score"] = pontuar_resultado(item)
-
-        if item["morada"] != "Não encontrada" and codigo_postal_valido(item["codigo_postal"]):
-            geo = validar_morada_online(item["morada"], item["codigo_postal"])
-
-            item["geo_validada"] = geo.get("valida", False)
-            item["geo_motivo"] = geo.get("motivo", "")
-            item["geo_display_name"] = geo.get("display_name", "")
-
-            if geo.get("valida"):
-                item["score"] += 250
-            else:
-                item["score"] -= 80
-
         resultados.append(item)
+
+    resultados.sort(key=lambda x: x["score"], reverse=True)
+
+    # Geocoder só nos 2 melhores candidatos para não ficar lento.
+    candidatos_geo = [
+        r for r in resultados
+        if r.get("morada") != "Não encontrada"
+        and codigo_postal_valido(r.get("codigo_postal", ""))
+    ][:2]
+
+    for item in candidatos_geo:
+        geo = validar_morada_online(item["morada"], item["codigo_postal"])
+
+        item["geo_validada"] = geo.get("valida", False)
+        item["geo_motivo"] = geo.get("motivo", "")
+        item["geo_display_name"] = geo.get("display_name", "")
+
+        if geo.get("valida"):
+            item["score"] += 250
+        else:
+            if GEOCODER_STRICT:
+                item["score"] -= 180
+            else:
+                item["score"] -= 20
 
     resultados.sort(key=lambda x: x["score"], reverse=True)
 
@@ -1422,9 +1467,6 @@ def salvar_lote_em_arquivos(snapshot=None, excel_path=EXPORT_EXCEL, csv_path=EXP
 
 
 def limpar_ficheiros_exportacao(*paths):
-    lote_confirmado.clear()
-    uploads_pendentes.clear()
-
     for path in paths:
         try:
             if path and os.path.exists(path):
