@@ -865,14 +865,101 @@ def rodar_ocr_em_versoes(versoes: list[str]) -> str:
 # EXPORTAÇÃO
 # =========================
 
-def gerar_dataframe_lote():
-    return pd.DataFrame(lote_confirmado, columns=["Morada", "Código Postal", "Cidade", "Texto OCR"])
-
-
 def salvar_lote_em_arquivos():
-    df = gerar_dataframe_lote()
-    df.to_excel(EXPORT_EXCEL, index=False)
-    df.to_csv(EXPORT_CSV, index=False)
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.styles import GradientFill
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Etiquetas Aveiro"
+
+    # ── Cores ────────────────────────────────────────────────────────────
+    COR_HEADER_BG   = "1A3C5E"   # azul escuro
+    COR_HEADER_FONT = "FFFFFF"   # branco
+    COR_LINHA_PAR   = "EAF2FB"   # azul muito claro
+    COR_LINHA_IMPAR = "FFFFFF"   # branco
+    COR_BORDA       = "BFCFDD"   # cinza-azulado suave
+
+    borda = Border(
+        left   = Side(style="thin", color=COR_BORDA),
+        right  = Side(style="thin", color=COR_BORDA),
+        top    = Side(style="thin", color=COR_BORDA),
+        bottom = Side(style="thin", color=COR_BORDA),
+    )
+
+    borda_header = Border(
+        left   = Side(style="medium", color="0F2A42"),
+        right  = Side(style="medium", color="0F2A42"),
+        top    = Side(style="medium", color="0F2A42"),
+        bottom = Side(style="medium", color="0F2A42"),
+    )
+
+    # ── Cabeçalho ────────────────────────────────────────────────────────
+    headers = [
+        ("A1", "Código Postal"),
+        ("B1", "Morada"),
+    ]
+
+    for ref, titulo in headers:
+        c = ws[ref]
+        c.value     = titulo
+        c.font      = Font(name="Arial", bold=True, size=12, color=COR_HEADER_FONT)
+        c.fill      = PatternFill("solid", fgColor=COR_HEADER_BG)
+        c.alignment = Alignment(horizontal="center", vertical="center")
+        c.border    = borda_header
+
+    ws.row_dimensions[1].height = 32
+
+    # ── Dados ─────────────────────────────────────────────────────────────
+    for idx, item in enumerate(lote_confirmado, start=2):
+        cor_bg = COR_LINHA_PAR if idx % 2 == 0 else COR_LINHA_IMPAR
+        fill   = PatternFill("solid", fgColor=cor_bg)
+
+        cp     = item.get("Código Postal", "")
+        morada = item.get("Morada", "")
+
+        # Coluna A — Código Postal
+        ca = ws.cell(row=idx, column=1, value=cp)
+        ca.font      = Font(name="Arial", size=11, bold=True, color="1A3C5E")
+        ca.fill      = fill
+        ca.alignment = Alignment(horizontal="center", vertical="center")
+        ca.border    = borda
+
+        # Coluna B — Morada
+        cb = ws.cell(row=idx, column=2, value=morada)
+        cb.font      = Font(name="Arial", size=11)
+        cb.fill      = fill
+        cb.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+        cb.border    = borda
+
+        ws.row_dimensions[idx].height = 22
+
+    # ── Larguras das colunas ──────────────────────────────────────────────
+    ws.column_dimensions["A"].width = 18
+    ws.column_dimensions["B"].width = 55
+
+    # ── Congelar cabeçalho ────────────────────────────────────────────────
+    ws.freeze_panes = "A2"
+
+    # ── Linha de total no rodapé ──────────────────────────────────────────
+    total_row = len(lote_confirmado) + 2
+    ct = ws.cell(row=total_row, column=1, value=f"Total: {len(lote_confirmado)}")
+    ct.font      = Font(name="Arial", bold=True, size=10, color="555555")
+    ct.alignment = Alignment(horizontal="center")
+
+    wb.save(EXPORT_EXCEL)
+
+    # ── CSV simples ───────────────────────────────────────────────────────
+    import csv
+    with open(EXPORT_CSV, "w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.writer(f)
+        writer.writerow(["Código Postal", "Morada"])
+        for item in lote_confirmado:
+            writer.writerow([
+                item.get("Código Postal", ""),
+                item.get("Morada", ""),
+            ])
 
 
 def limpar_lote_depois_exportar():
