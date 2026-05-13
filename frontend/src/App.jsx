@@ -591,7 +591,7 @@ export default function App() {
           </h1>
 
           <span className="badge">
-            v2.3
+            v2.4
           </span>
         </header>
 
@@ -700,7 +700,7 @@ export default function App() {
                   className="edit-input"
                   value={moradaEdit}
                   onChange={(e) => setMoradaEdit(e.target.value)}
-                  placeholder="Ex: AVENIDA EUROPA Nº292"
+                  placeholder="Morada encontrada na etiqueta"
                 />
               </label>
 
@@ -710,7 +710,7 @@ export default function App() {
                   className="edit-input mono"
                   value={codigoEdit}
                   onChange={(e) => setCodigoEdit(e.target.value)}
-                  placeholder="Ex: 3800-974"
+                  placeholder="Código postal encontrado"
                 />
               </label>
             </div>
