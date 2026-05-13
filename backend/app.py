@@ -238,6 +238,7 @@ def corrigir_ocr_para_morada(texto: str) -> str:
         "AYARO": "AVEIRO",
         "AVERO": "AVEIRO",
         "AVE1R0": "AVEIRO",
+        "AVE1RO": "AVEIRO",
         "E56UEIRA": "ESGUEIRA",
         "ESGUERA": "ESGUEIRA",
         "ESGUSA": "ESGUEIRA",
@@ -298,71 +299,77 @@ def normalizar_morada_extraida(morada: str) -> str:
     m = corrigir_ocr_para_morada(str(morada)).upper()
 
     trocas = {
+        " Nº ": " Nº ",
+        " N° ": " Nº ",
+        " N. ": " Nº ",
+        " NR ": " Nº ",
+        " NR": " Nº",
+        " N ": " Nº ",
+        " NO ": " Nº ",
+
         "REP0BLICA": "REPUBLICA",
         "REPOBLICA": "REPUBLICA",
         "REPÚBLICA": "REPUBLICA",
+        "RUADAREPUBLICA": "RUA DA REPUBLICA",
+        "RUA DAREPUBLICA": "RUA DA REPUBLICA",
+        "RUA DAREP0BLICA": "RUA DA REPUBLICA",
+        "RUA DAREPOBLICA": "RUA DA REPUBLICA",
+        "DAREPUBLICA": "DA REPUBLICA",
+        "DAREPOBLICA": "DA REPUBLICA",
 
         "DOUT0R": "DOUTOR",
         "D0UTOR": "DOUTOR",
         "DR ": "DOUTOR ",
-
         "JOSE": "JOSÉ",
         "GRACA": "GRAÇA",
 
         "PORTAO": "PORTÃO",
         "PORTA0": "PORTÃO",
-
         "VIVIENDA": "VIVENDA",
 
         "TRAVESSADO": "TRAVESSA DO",
         "TRAVESSAD0": "TRAVESSA DO",
         "TRAVESSA D0": "TRAVESSA DO",
         "TRAVESSA0": "TRAVESSA DO",
-        "TRAVESSA D": "TRAVESSA DO",
-
+        "TRAVESSA D ": "TRAVESSA DO ",
         "MILAO": "MILÃO",
         "MIL4O": "MILÃO",
         "M1LAO": "MILÃO",
 
+        "RUADAPAZ": "RUA DA PAZ",
+        "RUA DAPAZ": "RUA DA PAZ",
+        "RUA DA PA2": "RUA DA PAZ",
+        "CAC1A": "CACIA",
+        "CÁCIA": "CACIA",
+        "CACA": "CACIA",
+
+        "PCT DARUADA": "PCT DA RUA DA",
+        "PCT DA RUA": "PRACETA DA RUA",
+        "PCT ": "PRACETA ",
+
         "SANTARI0S": "SANITÁRIOS",
         "SANTARIOS": "SANITÁRIOS",
         "SANITARIOS": "SANITÁRIOS",
-
         "SIOML": "SEIXAL",
         "SEI XAL": "SEIXAL",
         "SEIX0L": "SEIXAL",
 
-        "RUADAREPUBLICA": "RUA DA REPUBLICA",
-        "RUA DAREPUBLICA": "RUA DA REPUBLICA",
-        "RUA DAREP0BLICA": "RUA DA REPUBLICA",
-        "RUA DAREPOBLICA": "RUA DA REPUBLICA",
-
-        "DAREPUBLICA": "DA REPUBLICA",
-        "DAREPOBLICA": "DA REPUBLICA",
-
-        "RUADAPAZ": "RUA DA PAZ",
-        "RUA DAPAZ": "RUA DA PAZ",
-        "RUA DA PA2": "RUA DA PAZ",
-
-        "CACA": "CACIA",
-        "CAC1A": "CACIA",
-        "CÁCIA": "CACIA",
-
-        "PCT DARUADA": "PCT DA RUA DA",
-        "PCT DA RUA": "PRACETA DA RUA",
-        "PCT": "PRACETA",
-
-        " NR ": " Nº ",
-        " NR": " Nº",
-        " N ": " Nº ",
-        " N.": " Nº",
-        " NO ": " Nº ",
-        " N0 ": " Nº ",
-        " N° ": " Nº ",
+        "AVEIR0": "AVEIRO",
+        "AVE1RO": "AVEIRO",
+        "AVE1R0": "AVEIRO",
+        "AVERO": "AVEIRO",
+        "AVARO": "AVEIRO",
+        "AYARO": "AVEIRO",
+        "ESGUERA": "ESGUEIRA",
+        "E56UEIRA": "ESGUEIRA",
+        "ESGUSA": "ESGUEIRA",
+        "ESGUELSA": "ESGUEIRA",
     }
 
     for errado, certo in trocas.items():
         m = m.replace(errado, certo)
+
+    m = re.sub(r"\bNº\s*O\b", "Nº 0", m)
 
     m = re.sub(r"([A-ZÁÀÂÃÉÈÊÍÌÓÒÔÕÚÙÇ])(\d)", r"\1 \2", m)
     m = re.sub(r"(\d)([A-ZÁÀÂÃÉÈÊÍÌÓÒÔÕÚÙÇ])", r"\1 \2", m)
@@ -371,6 +378,7 @@ def normalizar_morada_extraida(morada: str) -> str:
     m = re.sub(r"\bNR\s*(\d+)", r"Nº \1", m)
 
     m = m.replace(" ,", ",")
+    m = re.sub(r"[|_]+", " ", m)
     m = re.sub(r"\s+", " ", m).strip()
 
     return limpar_linha(m)
@@ -381,11 +389,12 @@ def normalizar_morada_extraida(morada: str) -> str:
 # =========================
 
 PALAVRAS_MORADA = [
-    "RUA", "AVENIDA", "AV.", "ALAMEDA", "TRAVESSA", "LARGO",
-    "PRAÇA", "PRACA", "PRACETA", "PCT", "ESTRADA", "ESTRADA NACIONAL",
-    "EST.", "EST ", "ESTR.", "EST.NAC", "EST NAC", "NACIONAL",
-    "CAMINHO", "URBANIZAÇÃO", "URBANIZACAO", "ROTUNDA",
-    "BECO", "BAIRRO", "QUINTA", "LOTE", "ZONA", "R.",
+    "RUA", "R.", "AVENIDA", "AV.", "ALAMEDA", "TRAVESSA", "TV.",
+    "LARGO", "PRAÇA", "PRACA", "PRACETA", "PCT", "ESTRADA",
+    "ESTRADA NACIONAL", "EST.", "EST ", "ESTR.", "EST.NAC",
+    "EST NAC", "NACIONAL", "CAMINHO", "CM.", "URBANIZAÇÃO",
+    "URBANIZACAO", "ROTUNDA", "BECO", "BAIRRO", "QUINTA",
+    "LOTE", "ZONA", "LUGAR", "CASAL", "VIVENDA", "CASA",
 ]
 
 PALAVRAS_DESCARTAR = [
@@ -592,6 +601,11 @@ def eh_linha_cidade(linha: str) -> bool:
     return letras >= 3 and numeros <= 3
 
 
+def linha_tem_via(linha: str) -> bool:
+    l = normalizar_morada_extraida(linha).upper()
+    return any(p in l for p in PALAVRAS_MORADA)
+
+
 def eh_morada_valida(linha: str) -> bool:
     l = normalizar_morada_extraida(linha).upper().strip()
 
@@ -610,10 +624,16 @@ def eh_morada_valida(linha: str) -> bool:
     if tem_palavra_morada and tem_numero:
         return True
 
+    if tem_palavra_morada and ("Nº" in l or " N " in l or " NR " in l):
+        return True
+
+    if tem_palavra_morada and len(l) >= 12:
+        return True
+
     complementos = [
         "VIVENDA", "PORTÃO", "PORTAO", "VERMELHO", "GRANDE",
         "LOTE", "BLOCO", "ANDAR", "ESQ", "DTO", "FRENTE",
-        "CASA", "ARMAZEM", "ARMAZÉM",
+        "CASA", "ARMAZEM", "ARMAZÉM", "PORTA", "PISO",
     ]
 
     if any(c in l for c in complementos) and len(l) >= 8:
@@ -628,7 +648,8 @@ def limpar_morada_final(morada: str) -> str:
     vias = [
         "RUA", "AVENIDA", "ALAMEDA", "TRAVESSA", "LARGO",
         "PRAÇA", "PRACA", "PRACETA", "ESTRADA", "CAMINHO",
-        "BECO", "BAIRRO", "QUINTA", "ROTUNDA",
+        "BECO", "BAIRRO", "QUINTA", "ROTUNDA", "LUGAR",
+        "CASAL",
     ]
 
     upper = m.upper()
@@ -645,14 +666,20 @@ def limpar_morada_final(morada: str) -> str:
         m = m[melhor_pos:].strip()
 
     m = re.sub(r"\b(3800|3810)\s*[- ]?\s*\d{3}\b.*$", "", m).strip()
-    m = re.sub(
-        r"\b(DESTINATARIO|DESTINATÁRIO|REMETENTE|REMITENTE|OBSERVACIONES|OBSERVAÇÕES)\b",
-        "",
-        m,
-        flags=re.IGNORECASE,
-    )
+
+    lixo = [
+        "DESTINATARIO", "DESTINATÁRIO", "REMETENTE", "REMITENTE",
+        "OBSERVACIONES", "OBSERVAÇÕES", "OBSERVACOES",
+        "VALORES AÑADIDOS", "VALORES ADICIONADOS",
+        "CODIGO BULTO", "CÓDIGO BULTO",
+    ]
+
+    for palavra in lixo:
+        m = re.sub(r"\b" + re.escape(palavra) + r"\b", "", m, flags=re.IGNORECASE)
 
     m = re.sub(r"\s+", " ", m).strip()
+    m = m.strip(" ,.;:-")
+
     return m
 
 
@@ -671,10 +698,46 @@ def linha_parece_complemento_morada(linha: str) -> bool:
     complementos = [
         "VIVENDA", "PORTÃO", "PORTAO", "VERMELHO", "GRANDE",
         "LOTE", "BLOCO", "ANDAR", "ESQ", "DTO", "FRENTE",
-        "CASA", "ARMAZEM", "ARMAZÉM",
+        "CASA", "ARMAZEM", "ARMAZÉM", "PORTA", "PISO",
+        "COM ", "JUNTO", "TRASEIRAS",
     ]
 
-    return any(c in l for c in complementos)
+    if any(c in l for c in complementos):
+        return True
+
+    letras = len(re.findall(r"[A-ZÁÀÂÃÉÈÊÍÌÓÒÔÕÚÙÇ]", l))
+    numeros = len(re.findall(r"\d", l))
+
+    if letras >= 8 and numeros <= 4 and not linha_tem_via(l):
+        return True
+
+    return False
+
+
+def linha_ruim_para_morada(linha: str) -> bool:
+    l = str(linha).upper().strip()
+
+    if not l:
+        return True
+
+    bloqueios = [
+        "C.B:", "CB:", "CODIGO BULTO", "CÓDIGO BULTO",
+        "OBS", "EXPEDICION", "EXPEDIÇÃO", "REMETENTE",
+        "REMITENTE", "PAQ", "PESO", "KGS", "REF:",
+        "HTTP", "WWW", "VALORES", "BARCELONA", "MADRID",
+        "SPAIN", "ESPAÑA", "ESPANA",
+    ]
+
+    if any(b in l for b in bloqueios):
+        return True
+
+    if re.match(r"^[A-Z0-9]{12,}$", l):
+        return True
+
+    if re.match(r"^\d{7,}$", l):
+        return True
+
+    return False
 
 
 def extrair_morada_antes_do_cp_na_linha(linha: str, inicio_cp: int) -> str:
@@ -682,27 +745,6 @@ def extrair_morada_antes_do_cp_na_linha(linha: str, inicio_cp: int) -> str:
 
     if not parte_antes:
         return ""
-
-    parte_antes = normalizar_morada_extraida(parte_antes)
-
-    vias = [
-        "RUA", "AVENIDA", "ALAMEDA", "TRAVESSA", "LARGO",
-        "PRAÇA", "PRACA", "PRACETA", "PCT", "ESTRADA",
-        "CAMINHO", "BECO", "BAIRRO", "QUINTA", "ROTUNDA",
-    ]
-
-    parte_upper = parte_antes.upper()
-    melhor_pos = None
-
-    for via in vias:
-        pos = parte_upper.find(via)
-
-        if pos != -1:
-            if melhor_pos is None or pos < melhor_pos:
-                melhor_pos = pos
-
-    if melhor_pos is not None:
-        parte_antes = parte_antes[melhor_pos:].strip()
 
     parte_antes = limpar_morada_final(parte_antes)
 
@@ -712,7 +754,7 @@ def extrair_morada_antes_do_cp_na_linha(linha: str, inicio_cp: int) -> str:
     if eh_morada_valida(parte_antes):
         return parte_antes
 
-    if any(v in parte_antes.upper() for v in vias) and re.search(r"\d", parte_antes):
+    if linha_tem_via(parte_antes) and re.search(r"\d", parte_antes):
         return parte_antes
 
     return ""
@@ -808,65 +850,66 @@ def _linha_quebra_bloco(linha: str) -> bool:
 
 def montar_morada_multilinha(linhas: list[str], cp_index: int) -> str:
     candidatos = []
-    inicio = max(0, cp_index - 6)
+    inicio = max(0, cp_index - 8)
 
     for i in range(cp_index - 1, inicio - 1, -1):
-        linha_atual = linhas[i].strip()
+        linha_base_raw = linhas[i].strip()
 
-        if _linha_quebra_bloco(linha_atual):
+        if linha_ruim_para_morada(linha_base_raw):
             continue
 
-        linha_norm = normalizar_morada_extraida(linha_atual)
+        linha_base = normalizar_morada_extraida(linha_base_raw)
 
-        if eh_morada_nao_portugal(linha_norm):
+        if eh_morada_nao_portugal(linha_base):
             continue
 
-        if eh_morada_valida(linha_norm):
-            candidatos.append({
-                "morada": limpar_morada_final(linha_norm),
-                "score": 120 + max(0, 60 - abs(cp_index - i) * 10),
-            })
+        if not linha_tem_via(linha_base) and not eh_morada_valida(linha_base):
+            continue
 
-        if i + 1 < cp_index:
-            linha_seguinte_raw = linhas[i + 1].strip()
-            linha_seguinte = normalizar_morada_extraida(linha_seguinte_raw)
+        partes = [linha_base]
 
-            if not _linha_quebra_bloco(linha_seguinte_raw):
-                combinada = f"{linha_norm} {linha_seguinte}"
-                combinada = limpar_morada_final(combinada)
+        for j in range(i + 1, min(cp_index, i + 4)):
+            prox_raw = linhas[j].strip()
 
-                if eh_morada_valida(combinada):
-                    score = 180 + max(0, 70 - abs(cp_index - i) * 10)
+            if linha_ruim_para_morada(prox_raw):
+                continue
 
-                    if linha_parece_complemento_morada(linha_seguinte):
-                        score += 80
+            if _linha_quebra_bloco(prox_raw):
+                continue
 
-                    candidatos.append({
-                        "morada": combinada,
-                        "score": score,
-                    })
+            prox = normalizar_morada_extraida(prox_raw)
 
-        if i + 2 < cp_index:
-            l2_raw = linhas[i + 1].strip()
-            l3_raw = linhas[i + 2].strip()
+            if eh_morada_nao_portugal(prox):
+                continue
 
-            l2 = normalizar_morada_extraida(l2_raw)
-            l3 = normalizar_morada_extraida(l3_raw)
+            if linha_parece_complemento_morada(prox) or linha_tem_via(prox):
+                partes.append(prox)
 
-            if not _linha_quebra_bloco(l2_raw) and not _linha_quebra_bloco(l3_raw):
-                combinada = f"{linha_norm} {l2} {l3}"
-                combinada = limpar_morada_final(combinada)
+        combinada = " ".join(partes)
+        combinada = limpar_morada_final(combinada)
 
-                if eh_morada_valida(combinada):
-                    score = 200 + max(0, 70 - abs(cp_index - i) * 10)
+        if not combinada:
+            continue
 
-                    if linha_parece_complemento_morada(l2) or linha_parece_complemento_morada(l3):
-                        score += 80
+        if not eh_morada_valida(combinada):
+            continue
 
-                    candidatos.append({
-                        "morada": combinada,
-                        "score": score,
-                    })
+        score = 200
+        score += max(0, 80 - abs(cp_index - i) * 10)
+
+        if "Nº" in combinada:
+            score += 40
+
+        if re.search(r"\d", combinada):
+            score += 35
+
+        if any(c in combinada.upper() for c in ["VIVENDA", "PORTÃO", "VERMELHO", "GRANDE", "LOTE", "ESQ", "DTO"]):
+            score += 30
+
+        candidatos.append({
+            "morada": combinada,
+            "score": score,
+        })
 
     if not candidatos:
         return ""
@@ -874,6 +917,43 @@ def montar_morada_multilinha(linhas: list[str], cp_index: int) -> str:
     candidatos.sort(key=lambda x: x["score"], reverse=True)
 
     return candidatos[0]["morada"]
+
+
+def formatar_morada_pelo_geocoder(morada: str, codigo_postal: str, geo: dict) -> str:
+    if not geo.get("valida"):
+        return morada
+
+    display = geo.get("display_name", "") or ""
+
+    if not display:
+        return morada
+
+    primeira_parte = display.split(",")[0].strip()
+
+    if not primeira_parte:
+        return morada
+
+    morada_limpa = limpar_morada_final(morada)
+    primeira_parte = normalizar_morada_extraida(primeira_parte)
+
+    if linha_tem_via(primeira_parte) and len(primeira_parte) >= 8:
+        numeros = re.findall(r"\b\d+[A-Z]?\b", morada_limpa)
+        complemento = ""
+
+        for palavra in ["VIVENDA", "PORTÃO", "VERMELHO", "GRANDE", "LOTE", "BLOCO", "ESQ", "DTO"]:
+            if palavra in morada_limpa.upper():
+                complemento = morada_limpa
+                break
+
+        if numeros and not re.search(r"\b\d+[A-Z]?\b", primeira_parte):
+            primeira_parte = f"{primeira_parte} Nº {numeros[0]}"
+
+        if complemento and complemento.upper() != primeira_parte.upper():
+            return morada_limpa
+
+        return primeira_parte
+
+    return morada_limpa
 
 
 # =========================
@@ -1122,11 +1202,11 @@ def encontrar_morada_para_codigo(linhas: list[str], cp_info: dict) -> str:
 
     candidatos = []
 
-    for i in range(cp_index - 1, max(-1, cp_index - 10), -1):
+    for i in range(cp_index - 1, max(-1, cp_index - 12), -1):
         linha_raw = linhas[i].strip()
         linha = normalizar_morada_extraida(linha_raw)
 
-        if _linha_quebra_bloco(linha_raw):
+        if linha_ruim_para_morada(linha_raw):
             continue
 
         if eh_morada_nao_portugal(linha):
@@ -1141,26 +1221,6 @@ def encontrar_morada_para_codigo(linhas: list[str], cp_info: dict) -> str:
                     "score": score,
                     "index": i,
                 })
-
-    if not candidatos:
-        inicio = max(0, cp_index - 12)
-
-        for i in range(inicio, cp_index):
-            linha_raw = linhas[i].strip()
-            linha = normalizar_morada_extraida(linha_raw)
-
-            if eh_morada_nao_portugal(linha):
-                continue
-
-            if eh_morada_valida(linha):
-                score = pontuar_morada(linha, i, cp_index)
-
-                if score > 0:
-                    candidatos.append({
-                        "linha": limpar_morada_final(linha),
-                        "score": score,
-                        "index": i,
-                    })
 
     if not candidatos:
         return ""
@@ -1183,10 +1243,10 @@ def pontuar_resultado(resultado: dict) -> int:
         score += 200
 
     if morada and morada != "Não encontrada":
-        score += 200
+        score += 220
 
     if eh_morada_valida(morada):
-        score += 120
+        score += 150
 
     if eh_morada_nao_portugal(morada):
         score -= 9999
@@ -1196,7 +1256,7 @@ def pontuar_resultado(resultado: dict) -> int:
             score += 300
 
     if origem_codigo in ["partido", "partido_localidade"]:
-        score -= 80
+        score -= 60
 
     if cidade and cidade != "Não encontrada":
         score += 30
@@ -1251,8 +1311,8 @@ def extrair_dados_aveiro(texto: str) -> dict:
         cidade = corrigir_ocr_para_morada(cp.get("cidade", ""))
         idx = cp["linha_index"]
 
-        contexto_inicio = max(0, idx - 5)
-        contexto_fim = min(len(linhas), idx + 5)
+        contexto_inicio = max(0, idx - 6)
+        contexto_fim = min(len(linhas), idx + 6)
         contexto = "\n".join(linhas[contexto_inicio:contexto_fim])
 
         item = {
@@ -1276,7 +1336,7 @@ def extrair_dados_aveiro(texto: str) -> dict:
         r for r in resultados
         if r.get("morada") != "Não encontrada"
         and codigo_postal_valido(r.get("codigo_postal", ""))
-    ][:2]
+    ][:3]
 
     for item in candidatos_geo:
         geo = validar_morada_online(item["morada"], item["codigo_postal"])
@@ -1287,11 +1347,20 @@ def extrair_dados_aveiro(texto: str) -> dict:
 
         if geo.get("valida"):
             item["score"] += 250
+
+            morada_formatada = formatar_morada_pelo_geocoder(
+                item["morada"],
+                item["codigo_postal"],
+                geo,
+            )
+
+            if morada_formatada:
+                item["morada"] = morada_formatada
         else:
             if GEOCODER_STRICT:
                 item["score"] -= 180
             else:
-                item["score"] -= 20
+                item["score"] -= 10
 
     resultados.sort(key=lambda x: x["score"], reverse=True)
 
@@ -1570,7 +1639,7 @@ def salvar_lote_em_arquivos(snapshot=None, excel_path=EXPORT_EXCEL, csv_path=EXP
 
         ws.row_dimensions[idx].height = 24
 
-    ws.column_dimensions["A"].width = 70
+    ws.column_dimensions["A"].width = 75
     ws.column_dimensions["B"].width = 20
 
     ws.freeze_panes = "A4"

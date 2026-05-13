@@ -591,7 +591,7 @@ export default function App() {
           </h1>
 
           <span className="badge">
-            v2.4
+            v2.5
           </span>
         </header>
 
