@@ -597,4 +597,14 @@ body::before {
   opacity: 0.4;
   pointer-events: none;
 }
+
+.aviso-codigo {
+  font-size: 13px;
+  line-height: 1.45;
+  color: #facc15;
+  background: rgba(250, 204, 21, 0.1);
+  border: 1px solid rgba(250, 204, 21, 0.22);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
 }
