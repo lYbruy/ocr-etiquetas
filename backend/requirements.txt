@@ -9,3 +9,4 @@ pillow
 paddleocr==2.7.3
 paddlepaddle==2.6.2
 pydantic
+requests

@@ -27,7 +27,6 @@ export default function App() {
 
   const [moradaEdit, setMoradaEdit] = useState('')
   const [codigoEdit, setCodigoEdit] = useState('')
-  const [cidadeEdit, setCidadeEdit] = useState('')
 
   useEffect(() => {
     iniciarSistema()
@@ -65,19 +64,6 @@ export default function App() {
       })
 
       setTotalLote(0)
-    } catch (e) {
-      console.error(e)
-    }
-  }
-
-  async function atualizarResumoLote() {
-    try {
-      const response = await fetch(`${API}/resumo-lote`)
-      const data = await response.json().catch(() => null)
-
-      if (data?.total !== undefined) {
-        setTotalLote(data.total)
-      }
     } catch (e) {
       console.error(e)
     }
@@ -374,12 +360,6 @@ export default function App() {
               : ''
           )
 
-          setCidadeEdit(
-            data?.cidade && data.cidade !== 'Não encontrada'
-              ? data.cidade
-              : ''
-          )
-
           setAutoStatus('Confirme os dados encontrados')
         } catch (e) {
           console.error(e)
@@ -428,7 +408,7 @@ export default function App() {
           upload_id: resultado?.upload_id,
           morada: moradaEdit,
           codigo_postal: codigoEdit,
-          cidade: cidadeEdit,
+          cidade: '',
           texto_ocr: resultado?.texto_ocr || '',
         }),
       })
@@ -468,7 +448,6 @@ export default function App() {
 
     setMoradaEdit('')
     setCodigoEdit('')
-    setCidadeEdit('')
 
     capturandoRef.current = false
     stableCountRef.current = 0
@@ -568,7 +547,7 @@ export default function App() {
           </h1>
 
           <span className="badge">
-            v2.1
+            v2.2
           </span>
         </header>
 
@@ -664,7 +643,9 @@ export default function App() {
               <span className="resultado-status">
                 <span className="dot" />
 
-                Confirmar etiqueta
+                {resultado?.geo_validada
+                  ? 'Morada validada online'
+                  : 'Confirmar etiqueta'}
               </span>
             </div>
 
@@ -688,16 +669,6 @@ export default function App() {
                   placeholder="Ex: 3800-974"
                 />
               </label>
-
-              <label className="edit-label">
-                Localidade
-                <input
-                  className="edit-input"
-                  value={cidadeEdit}
-                  onChange={(e) => setCidadeEdit(e.target.value)}
-                  placeholder="Ex: AVEIRO"
-                />
-              </label>
             </div>
 
             {resultados.length > 0 && (
@@ -719,12 +690,6 @@ export default function App() {
                       )
 
                       setCodigoEdit(item.codigo_postal || '')
-
-                      setCidadeEdit(
-                        item.cidade !== 'Não encontrada'
-                          ? item.cidade
-                          : ''
-                      )
                     }}
                   >
                     <span>
@@ -733,9 +698,6 @@ export default function App() {
 
                     <strong>
                       {item.codigo_postal}
-                      {item.cidade && item.cidade !== 'Não encontrada'
-                        ? ` ${item.cidade}`
-                        : ''}
                     </strong>
                   </button>
                 ))}
