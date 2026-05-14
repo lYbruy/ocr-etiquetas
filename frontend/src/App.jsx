@@ -122,7 +122,10 @@ export default function App() {
       const video = videoRef.current
 
       if (video && video.srcObject) {
-        video.srcObject.getTracks().forEach(track => track.stop())
+        video.srcObject
+          .getTracks()
+          .forEach(track => track.stop())
+
         video.srcObject = null
       }
     } catch (e) {
@@ -132,6 +135,7 @@ export default function App() {
 
   function iniciarAutoDetector() {
     pararAutoDetector()
+
     stableCountRef.current = 0
 
     autoTimerRef.current = setInterval(() => {
@@ -160,7 +164,9 @@ export default function App() {
     const video = videoRef.current
     const canvas = detectorCanvasRef.current
 
-    if (!video || !canvas) return
+    if (!video || !canvas) {
+      return
+    }
 
     if (
       fotoRef.current ||
@@ -172,7 +178,9 @@ export default function App() {
       return
     }
 
-    if (!video.videoWidth || !video.videoHeight) return
+    if (!video.videoWidth || !video.videoHeight) {
+      return
+    }
 
     const width = 280
     const height = 180
@@ -256,7 +264,9 @@ export default function App() {
   }
 
   async function tirarFoto(auto = false) {
-    if (loadingRef.current) return
+    if (loadingRef.current) {
+      return
+    }
 
     atualizarLoading(true)
     setErro(null)
@@ -279,9 +289,19 @@ export default function App() {
       canvas.height = video.videoHeight
 
       const ctx = canvas.getContext('2d')
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
 
-      const imageData = canvas.toDataURL('image/jpeg', 0.9)
+      ctx.drawImage(
+        video,
+        0,
+        0,
+        canvas.width,
+        canvas.height
+      )
+
+      const imageData = canvas.toDataURL(
+        'image/jpeg',
+        0.9
+      )
 
       atualizarFoto(imageData)
       setAutoStatus(auto ? 'Foto capturada automaticamente' : 'Foto capturada')
@@ -296,13 +316,23 @@ export default function App() {
         }
 
         const form = new FormData()
-        form.append('file', blob, 'foto.jpg')
+
+        form.append(
+          'file',
+          blob,
+          'foto.jpg'
+        )
 
         try {
-          const response = await fetch(`${API}/upload`, {
-            method: 'POST',
-            body: form,
-          })
+          console.log('Enviando imagem para API...')
+
+          const response = await fetch(
+            `${API}/upload`,
+            {
+              method: 'POST',
+              body: form,
+            }
+          )
 
           const data = await response.json().catch(() => null)
 
@@ -335,16 +365,25 @@ export default function App() {
           await atualizarResumoLote()
         } catch (e) {
           console.error(e)
-          setErro(e.message || 'Falha ao processar a etiqueta.')
+
+          setErro(
+            e.message || 'Falha ao processar a etiqueta.'
+          )
+
           atualizarResultado(null)
         } finally {
           atualizarLoading(false)
           capturandoRef.current = false
         }
       }, 'image/jpeg', 0.9)
+
     } catch (e) {
       console.error(e)
-      setErro(e.message || 'Erro ao tirar foto.')
+
+      setErro(
+        e.message || 'Erro ao tirar foto.'
+      )
+
       atualizarLoading(false)
       capturandoRef.current = false
       iniciarAutoDetector()
@@ -393,6 +432,7 @@ export default function App() {
       setTimeout(() => {
         proximaEtiqueta()
       }, 700)
+
     } catch (e) {
       console.error(e)
       setErro(e.message || 'Erro ao confirmar etiqueta.')
@@ -454,7 +494,9 @@ export default function App() {
 
   async function baixarArquivo(tipo) {
     try {
-      if (totalLote === 0 || loading) return
+      if (totalLote === 0 || loading) {
+        return
+      }
 
       setErro(null)
       atualizarLoading(true)
@@ -492,252 +534,266 @@ export default function App() {
   const resultados = resultado?.todos_resultados || []
 
   return (
-    <div className="app-shell">
-      <div className="app-background">
-        <span className="blur blur-one" />
-        <span className="blur blur-two" />
-        <span className="grid-bg" />
-      </div>
+    <div className="root">
+      <div className="card">
+        <header className="header">
+          <div className="logo-mark">
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 20 20"
+              fill="none"
+            >
+              <rect
+                x="1"
+                y="1"
+                width="6"
+                height="6"
+                rx="1"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              />
 
-      <main className="app-container">
-        <section className="hero-panel">
-          <div className="brand-row">
-            <div className="brand-icon">
-              <span>EI</span>
-            </div>
+              <rect
+                x="13"
+                y="1"
+                width="6"
+                height="6"
+                rx="1"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              />
 
-            <div>
-              <p className="eyebrow">Sistema OCR profissional</p>
-              <h1>Etapas Imperdíveis</h1>
-            </div>
+              <rect
+                x="1"
+                y="13"
+                width="6"
+                height="6"
+                rx="1"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              />
 
-            <span className="version-pill">v2.5</span>
+              <rect
+                x="13"
+                y="13"
+                width="6"
+                height="6"
+                rx="1"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              />
+            </svg>
           </div>
 
-          <div className="hero-content">
-            <h2>Leitura inteligente de etiquetas</h2>
-            <p>
-              Aponte a câmara para uma etiqueta, confirme os dados encontrados
-              e exporte o lote completo em Excel ou CSV.
+          <h1 className="title">
+            ETAPAS IMPERDÍVEIS
+          </h1>
+
+          <span className="badge">
+            v2.5
+          </span>
+        </header>
+
+        <div className="lote-box">
+          <div>
+            <span>
+              Etiquetas no lote
+            </span>
+
+            <small>
+              Confirme várias e exporte tudo no fim
+            </small>
+          </div>
+
+          <strong>
+            {totalLote}
+          </strong>
+        </div>
+
+        <div className="viewport">
+          <div className={`camera-wrap ${foto ? 'camera-hidden' : ''}`}>
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              className="video"
+            />
+
+            <div className="overlay">
+              <div className="bracket tl" />
+              <div className="bracket tr" />
+              <div className="bracket bl" />
+              <div className="bracket br" />
+              <div className="scan-line" />
+            </div>
+
+            <p className="hint">
+              {autoStatus}
             </p>
           </div>
 
-          <div className="stats-grid">
-            <div className="stat-card active">
-              <span>Etiquetas no lote</span>
-              <strong>{totalLote}</strong>
-            </div>
-
-            <div className="stat-card">
-              <span>Estado</span>
-              <strong>{loading ? 'A processar' : 'Pronto'}</strong>
-            </div>
-          </div>
-        </section>
-
-        <section className="scanner-panel">
-          <div className="panel-top">
-            <div>
-              <p className="section-label">Scanner</p>
-              <h3>Captura da etiqueta</h3>
-            </div>
-
-            <div className={`status-chip ${loading ? 'loading' : ''}`}>
-              <span />
-              {loading ? 'A analisar' : 'Online'}
-            </div>
-          </div>
-
-          <div className="camera-frame">
-            <div className={`camera-wrap ${foto ? 'camera-hidden' : ''}`}>
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted
-                className="video"
+          {foto && (
+            <div className="preview-wrap">
+              <img
+                src={foto}
+                className="preview"
+                alt="Foto capturada"
               />
 
-              <div className="camera-overlay">
-                <div className="focus-box">
-                  <span className="corner top-left" />
-                  <span className="corner top-right" />
-                  <span className="corner bottom-left" />
-                  <span className="corner bottom-right" />
-                  <span className="scan-line" />
-                </div>
+              {loading && (
+                <div className="processing-overlay">
+                  <div className="spinner" />
 
-                <div className="camera-bottom">
-                  <p>{autoStatus}</p>
-                </div>
-              </div>
-            </div>
-
-            {foto && (
-              <div className="preview-wrap">
-                <img
-                  src={foto}
-                  className="preview"
-                  alt="Foto capturada"
-                />
-
-                {loading && (
-                  <div className="processing-overlay">
-                    <div className="loader-ring" />
-                    <h4>A analisar etiqueta</h4>
-                    <p>Estamos a extrair a morada e o código postal.</p>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          <canvas ref={canvasRef} hidden />
-          <canvas ref={detectorCanvasRef} hidden />
-
-          {erro && (
-            <div className="alert-error">
-              <strong>Erro</strong>
-              <p>{erro}</p>
-            </div>
-          )}
-
-          {!foto && (
-            <button
-              className="btn btn-primary"
-              onClick={tirarFotoManual}
-              disabled={loading}
-            >
-              <span className="btn-icon">⌁</span>
-              Tirar foto manualmente
-            </button>
-          )}
-
-          {resultado && !loading && (
-            <div className="result-card">
-              <div className="result-header">
-                <div>
-                  <p className="section-label">Resultado encontrado</p>
-                  <h3>
-                    {resultado?.geo_validada
-                      ? 'Morada validada online'
-                      : 'Confirme os dados'}
-                  </h3>
-                </div>
-
-                <span className={`validation-badge ${resultado?.geo_validada ? 'success' : 'warning'}`}>
-                  {resultado?.geo_validada ? 'Validada' : 'Revisar'}
-                </span>
-              </div>
-
-              <div className="form-grid">
-                <label className="form-field">
-                  <span>Morada</span>
-                  <input
-                    value={moradaEdit}
-                    onChange={(e) => setMoradaEdit(e.target.value)}
-                    placeholder="Morada encontrada na etiqueta"
-                  />
-                </label>
-
-                <label className="form-field">
-                  <span>Código postal</span>
-                  <input
-                    className="mono"
-                    value={codigoEdit}
-                    onChange={(e) => setCodigoEdit(e.target.value)}
-                    placeholder="0000-000"
-                  />
-                </label>
-              </div>
-
-              {resultados.length > 0 && (
-                <div className="suggestions-box">
-                  <div className="suggestions-title">
-                    <span>Sugestões encontradas</span>
-                    <small>{resultados.length} opção/opções</small>
-                  </div>
-
-                  <div className="suggestions-list">
-                    {resultados.map((item, index) => (
-                      <button
-                        type="button"
-                        className="suggestion-item"
-                        key={`${item.codigo_postal}-${index}`}
-                        onClick={() => {
-                          setMoradaEdit(
-                            item.morada !== 'Não encontrada'
-                              ? item.morada
-                              : ''
-                          )
-
-                          setCodigoEdit(item.codigo_postal || '')
-                        }}
-                      >
-                        <span>{item.morada}</span>
-                        <strong>{item.codigo_postal}</strong>
-                      </button>
-                    ))}
-                  </div>
+                  <span>
+                    A analisar etiqueta...
+                  </span>
                 </div>
               )}
-
-              <div className="result-actions">
-                <button
-                  className="btn btn-primary"
-                  onClick={confirmarEtiqueta}
-                  disabled={loading || adicionado}
-                >
-                  {adicionado ? 'Adicionado ao lote' : 'Confirmar e adicionar'}
-                </button>
-
-                <button
-                  className="btn btn-secondary"
-                  onClick={proximaEtiqueta}
-                  disabled={loading}
-                >
-                  Ignorar e próxima
-                </button>
-              </div>
             </div>
           )}
+        </div>
 
-          <div className="export-panel">
-            <div>
-              <p className="section-label">Exportação</p>
-              <h3>Ficheiros do lote</h3>
-            </div>
+        <canvas
+          ref={canvasRef}
+          hidden
+        />
 
-            <div className="export-actions">
-              <button
-                type="button"
-                onClick={() => baixarArquivo('excel')}
-                className="btn btn-download"
-                disabled={loading || totalLote === 0}
-              >
-                Excel
-              </button>
+        <canvas
+          ref={detectorCanvasRef}
+          hidden
+        />
 
-              <button
-                type="button"
-                onClick={() => baixarArquivo('csv')}
-                className="btn btn-download"
-                disabled={loading || totalLote === 0}
-              >
-                CSV
-              </button>
-            </div>
-          </div>
+        {erro && (
+          <p className="erro">
+            {erro}
+          </p>
+        )}
 
+        {!foto && (
           <button
-            className="btn btn-danger"
-            onClick={limparTudo}
+            className="btn-primary"
+            onClick={tirarFotoManual}
             disabled={loading}
           >
-            Limpar lote
+            Tirar Foto Manualmente
           </button>
-        </section>
-      </main>
+        )}
+
+        {resultado && !loading && (
+          <div className="resultado">
+            <div className="resultado-header">
+              <span className="resultado-status">
+                <span className="dot" />
+
+                {resultado?.geo_validada
+                  ? 'Morada validada online'
+                  : 'Confirmar etiqueta'}
+              </span>
+            </div>
+
+            <div className="edit-fields">
+              <label className="edit-label">
+                Morada
+                <input
+                  className="edit-input"
+                  value={moradaEdit}
+                  onChange={(e) => setMoradaEdit(e.target.value)}
+                  placeholder="Morada encontrada na etiqueta"
+                />
+              </label>
+
+              <label className="edit-label">
+                Código Postal
+                <input
+                  className="edit-input mono"
+                  value={codigoEdit}
+                  onChange={(e) => setCodigoEdit(e.target.value)}
+                  placeholder="Código postal encontrado"
+                />
+              </label>
+            </div>
+
+            {resultados.length > 0 && (
+              <div className="candidatos">
+                <span className="field-label">
+                  Sugestões encontradas
+                </span>
+
+                {resultados.map((item, index) => (
+                  <button
+                    type="button"
+                    className="candidate"
+                    key={`${item.codigo_postal}-${index}`}
+                    onClick={() => {
+                      setMoradaEdit(
+                        item.morada !== 'Não encontrada'
+                          ? item.morada
+                          : ''
+                      )
+
+                      setCodigoEdit(item.codigo_postal || '')
+                    }}
+                  >
+                    <span>
+                      {item.morada}
+                    </span>
+
+                    <strong>
+                      {item.codigo_postal}
+                    </strong>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <button
+              className="btn-primary"
+              onClick={confirmarEtiqueta}
+              disabled={loading || adicionado}
+            >
+              {adicionado ? 'Adicionado ao lote' : 'Confirmar e adicionar ao lote'}
+            </button>
+
+            <button
+              className="btn-secondary"
+              onClick={proximaEtiqueta}
+              disabled={loading}
+            >
+              Ignorar e ler próxima
+            </button>
+          </div>
+        )}
+
+        <div className="actions">
+          <button
+            type="button"
+            onClick={() => baixarArquivo('excel')}
+            className={`btn-download ${totalLote === 0 ? 'disabled-link' : ''}`}
+            disabled={loading || totalLote === 0}
+          >
+            Exportar Excel
+          </button>
+
+          <button
+            type="button"
+            onClick={() => baixarArquivo('csv')}
+            className={`btn-download ${totalLote === 0 ? 'disabled-link' : ''}`}
+            disabled={loading || totalLote === 0}
+          >
+            Exportar CSV
+          </button>
+        </div>
+
+        <button
+          className="btn-danger"
+          onClick={limparTudo}
+          disabled={loading}
+        >
+          Limpar lote
+        </button>
+      </div>
     </div>
   )
 }
