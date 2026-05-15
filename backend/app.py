@@ -384,6 +384,310 @@ def normalizar_morada_extraida(morada: str) -> str:
     return limpar_linha(m)
 
 
+def _corrigir_tokens_ocr_morada(texto: str) -> str:
+    """
+    Corrige tokens curtos de OCR apenas contra vocabulário de morada.
+    Não tenta adivinhar nomes completos: serve para palavras estruturais
+    como RUA/AVENIDA/INDUSTRIAL/LOTE e localidades aceites.
+    """
+    import difflib
+
+    texto = str(texto).upper()
+    texto = re.sub(r"\bLNOUSIR.?AL\b", "INDUSTRIAL", texto)
+    texto = re.sub(r"\b([A-ZÁÀÂÃÉÈÊÍÌÓÒÔÕÚÙÇ]{4,})NR\s*(\d+)", r"\1 NR \2", texto)
+    texto = re.sub(r"\bTABOEIRATAB\b", "TABOEIRA TAB", texto)
+
+    vocabulario = set(PALAVRAS_FORMATO_MORADA + LOCALIDADES_AVEIRO)
+    tokens = re.split(r"(\W+)", texto)
+    corrigidos = []
+
+    for token in tokens:
+        if (
+            len(token) < 5
+            or not re.search(r"[A-ZÁÀÂÃÉÈÊÍÌÓÒÔÕÚÙÇ]", token)
+            or re.search(r"\d", token)
+        ):
+            corrigidos.append(token)
+            continue
+
+        melhor = ""
+        melhor_score = 0.0
+
+        for palavra in vocabulario:
+            if abs(len(palavra) - len(token)) > 3:
+                continue
+
+            score = difflib.SequenceMatcher(None, token, palavra).ratio()
+
+            if score > melhor_score:
+                melhor = palavra
+                melhor_score = score
+
+        if melhor and melhor_score >= 0.74:
+            corrigidos.append(melhor)
+        else:
+            corrigidos.append(token)
+
+    return "".join(corrigidos)
+
+
+def _separar_palavras_coladas_morada(texto: str) -> str:
+    t = str(texto).upper()
+
+    artigos = ["DA", "DO", "DE", "DAS", "DOS"]
+    vias = [
+        "RUA", "AVENIDA", "ALAMEDA", "TRAVESSA", "LARGO",
+        "PRACETA", "PRACA", "PRAÇA", "ESTRADA", "CAMINHO",
+        "ZONA", "QUINTA", "LUGAR", "CASAL", "BAIRRO",
+    ]
+
+    for via in sorted(vias, key=len, reverse=True):
+        t = re.sub(rf"\b{via}(?=[A-ZÁÀÂÃÉÈÊÍÌÓÒÔÕÚÙÇ])", f"{via} ", t)
+
+    for artigo in sorted(artigos, key=len, reverse=True):
+        t = re.sub(
+            rf"\b({'|'.join(vias)})\s*{artigo}(?=[A-ZÁÀÂÃÉÈÊÍÌÓÒÔÕÚÙÇ])",
+            rf"\1 {artigo} ",
+            t,
+        )
+        t = re.sub(
+            rf"([A-ZÁÀÂÃÉÈÊÍÌÓÒÔÕÚÙÇ]{{4,}}){artigo}([A-ZÁÀÂÃÉÈÊÍÌÓÒÔÕÚÙÇ]{{3,}})",
+            rf"\1 {artigo} \2",
+            t,
+        )
+
+    pares_comuns = [
+        ("ZONA", "INDUSTRIAL"),
+        ("INDUSTRIAL", "DE"),
+        ("INDUSTRIAL", "DA"),
+        ("INDUSTRIAL", "DO"),
+        ("INDUSTRIAL", "DAS"),
+        ("INDUSTRIAL", "DOS"),
+        ("TABOEIRA", "TAB"),
+        ("REPUBLICA", "NR"),
+        ("REPUBLICA", "N"),
+        ("FRANCISCO", "DO"),
+        ("FRANCISCO", "DA"),
+        ("JOAO", "FRANCISCO"),
+    ]
+
+    for antes, depois in pares_comuns:
+        t = re.sub(rf"\b{antes}{depois}\b", f"{antes} {depois}", t)
+
+    for artigo in sorted(artigos, key=len, reverse=True):
+        t = re.sub(
+            rf"\b([A-ZÃÃ€Ã‚ÃƒÃ‰ÃˆÃŠÃÃŒÃ“Ã’Ã”Ã•ÃšÃ™Ã‡]{{4,}}){artigo}\b",
+            rf"\1 {artigo}",
+            t,
+        )
+        t = re.sub(
+            rf"\b{artigo}([A-ZÃÃ€Ã‚ÃƒÃ‰ÃˆÃŠÃÃŒÃ“Ã’Ã”Ã•ÃšÃ™Ã‡]{{4,}})\b",
+            rf"{artigo} \1",
+            t,
+        )
+
+    termos_estruturais = [
+        "INDUSTRIAL", "NACIONAL", "REPUBLICA", "EUROPA", "TABOEIRA",
+        "AVEIRO", "ESGUEIRA", "CACIA", "ARADAS", "LOTE", "BLOCO",
+        "PORTA", "PISO", "ANDAR", "ARMAZEM", "ARMAZÃ‰M",
+    ]
+
+    for termo in sorted(termos_estruturais, key=len, reverse=True):
+        t = re.sub(
+            rf"\b([A-ZÃÃ€Ã‚ÃƒÃ‰ÃˆÃŠÃÃŒÃ“Ã’Ã”Ã•ÃšÃ™Ã‡]{{4,}}){termo}\b",
+            rf"\1 {termo}",
+            t,
+        )
+        t = re.sub(
+            rf"\b{termo}([A-ZÃÃ€Ã‚ÃƒÃ‰ÃˆÃŠÃÃŒÃ“Ã’Ã”Ã•ÃšÃ™Ã‡]{{4,}})\b",
+            rf"{termo} \1",
+            t,
+        )
+
+    t = re.sub(r"\bAVENI\s+DA\b", "AVENIDA", t)
+    t = re.sub(r"\bALAME\s+DA\b", "ALAMEDA", t)
+
+    t = re.sub(r"\bLT\b", "LOTE", t)
+    t = re.sub(r"([A-ZÁÀÂÃÉÈÊÍÌÓÒÔÕÚÙÇ]{4,})NR\s*(\d+)", r"\1 Nº \2", t)
+    t = re.sub(r"\b(REPUBLICA|REPÚBLICA)\s*N\s*R?\s*(\d+)", r"\1 Nº \2", t)
+    t = re.sub(r"\bNR\s*(\d+)", r"Nº \1", t)
+    t = re.sub(r"\bN\s*[º°]?\s*(\d+)", r"Nº \1", t)
+
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def _remover_lixo_etiqueta_morada(texto: str) -> str:
+    t = str(texto)
+
+    for palavra in sorted(PALAVRAS_CORTE_ETIQUETA, key=len, reverse=True):
+        padrao = r"(?i)(^|[\s,;|:/-])" + re.escape(palavra) + r"(\b|[:.])"
+        m = re.search(padrao, t)
+
+        if m:
+            t = t[:m.start()].strip()
+
+    t = re.sub(r"\b(3800|3810)\s*[- ]?\s*\d{3}\b.*$", "", t, flags=re.IGNORECASE)
+    t = re.sub(r"\b(3800|3810)\b\s*$", "", t, flags=re.IGNORECASE)
+
+    # Telefones, tracking e códigos internos longos que aparecem depois/colados à morada.
+    t = re.sub(r"(?:\+?\s*351\s*)?9(?:\s*\d){8}\b.*$", "", t)
+    t = re.sub(r"\b9\d{8}\b.*$", "", t)
+    t = re.sub(r"\b\d{6,}\b.*$", "", t)
+    t = re.sub(r"\b[A-Z]{1,6}\d{6,}[A-Z0-9]*\b.*$", "", t, flags=re.IGNORECASE)
+    t = re.sub(r"\b\d{2,}[A-Z]{2,}\d{3,}[A-Z0-9]*\b.*$", "", t, flags=re.IGNORECASE)
+
+    return t.strip()
+
+
+def _normalizar_numero_porta_morada(texto: str) -> str:
+    t = str(texto)
+
+    t = re.sub(r"\bN\s*[ÂºÂ°º]?\s*(\d{1,5}[A-Z]?)\b", r"NÂº \1", t, flags=re.IGNORECASE)
+    t = re.sub(r"\bNR\s*(\d{1,5}[A-Z]?)\b", r"NÂº \1", t, flags=re.IGNORECASE)
+    t = re.sub(r"\bNÂº\s*(\d{1,5})(ESQ|DTO|DIR|DRT|FTE|FRENTE|TRAS|TRASEIRAS)\b", r"NÂº \1 \2", t, flags=re.IGNORECASE)
+    t = re.sub(r"\b(\d{1,5})(ESQ|DTO|DIR|DRT|FTE|FRENTE|TRAS|TRASEIRAS)\b", r"\1 \2", t, flags=re.IGNORECASE)
+    t = re.sub(r"\bR\s*/\s*C\b", "R/C", t, flags=re.IGNORECASE)
+
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def _normalizar_mojibake_saida(texto: str) -> str:
+    t = str(texto)
+    trocas = {
+        "NÂº": "N\u00ba",
+        "NÂ°": "N\u00ba",
+        "Ã": "\u00c1",
+        "Ã€": "\u00c0",
+        "Ã‚": "\u00c2",
+        "Ãƒ": "\u00c3",
+        "Ã‰": "\u00c9",
+        "Ãˆ": "\u00c8",
+        "ÃŠ": "\u00ca",
+        "Ã": "\u00cd",
+        "ÃŒ": "\u00cc",
+        "Ã“": "\u00d3",
+        "Ã’": "\u00d2",
+        "Ã”": "\u00d4",
+        "Ã•": "\u00d5",
+        "Ãš": "\u00da",
+        "Ã™": "\u00d9",
+        "Ã‡": "\u00c7",
+        "Ã¡": "\u00e1",
+        "Ã ": "\u00e0",
+        "Ã¢": "\u00e2",
+        "Ã£": "\u00e3",
+        "Ã©": "\u00e9",
+        "Ãª": "\u00ea",
+        "Ã­": "\u00ed",
+        "Ã³": "\u00f3",
+        "Ãµ": "\u00f5",
+        "Ãº": "\u00fa",
+        "Ã§": "\u00e7",
+    }
+
+    for errado, certo in trocas.items():
+        t = t.replace(errado, certo)
+
+    return t
+
+
+def _remover_fragmentos_soltos_saida(texto: str) -> str:
+    t = str(texto)
+
+    t = re.sub(r"\b(ATT|OBS|REF|CLI|CB|C\.B|PAQ|PAQ24|BULTO|CODIGO|C\u00d3DIGO)\b.*$", "", t, flags=re.IGNORECASE)
+    t = re.sub(r"\b(TEL|TELEFONE|TELEMOVEL|TELEM\u00d3VEL|NIF|NIPC|CLIENTE)\b.*$", "", t, flags=re.IGNORECASE)
+    t = re.sub(r"\b(3800|3810)\s*[- ]?\s*\d{3}\b.*$", "", t, flags=re.IGNORECASE)
+    t = re.sub(r"\b(3800|3810)\b\s*$", "", t, flags=re.IGNORECASE)
+    t = re.sub(r"\b(?:\+?351)?\s*9(?:\s*\d){8}\b.*$", "", t)
+    t = re.sub(r"\b\d{6,}\b.*$", "", t)
+    t = re.sub(
+        r"\s+\b(?!LOTE|BLOCO|PORTA|PISO|ANDAR|ARMAZEM|ARMAZ\u00c9M)[A-Z]{2,4}\s+\d{3,}\b\s*$",
+        "",
+        t,
+        flags=re.IGNORECASE,
+    )
+
+    return t.strip(" ,.;:-")
+
+
+def _normalizar_numero_porta_morada(texto: str) -> str:
+    t = str(texto)
+    grau = "\u00ba"
+    grau_alt = "\u00b0"
+    grau_mojibake = "\u00c2\u00ba"
+    simbolos = re.escape(grau + grau_alt + grau_mojibake)
+    marcador = "N" + grau
+
+    t = re.sub(rf"\bN\s*[{simbolos}]?\s*(\d{{1,5}}[A-Z]?)\b", rf"{marcador} \1", t, flags=re.IGNORECASE)
+    t = re.sub(r"\bNR\s*(\d{1,5}[A-Z]?)\b", rf"{marcador} \1", t, flags=re.IGNORECASE)
+    t = re.sub(rf"\bN\s*[{simbolos}]\s*(\d{{1,5}})(ESQ|DTO|DIR|DRT|FTE|FRENTE|TRAS|TRASEIRAS)\b", rf"{marcador} \1 \2", t, flags=re.IGNORECASE)
+    t = re.sub(r"\b(\d{1,5})(ESQ|DTO|DIR|DRT|FTE|FRENTE|TRAS|TRASEIRAS)\b", r"\1 \2", t, flags=re.IGNORECASE)
+    t = re.sub(r"\bR\s*/\s*C\b", "R/C", t, flags=re.IGNORECASE)
+
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def _normalizar_mojibake_saida(texto: str) -> str:
+    t = str(texto)
+    trocas = {
+        "N" + "\u00c2\u00ba": "N\u00ba",
+        "N" + "\u00c2\u00b0": "N\u00ba",
+        "\u00c3\u0081": "\u00c1",
+        "\u00c3\u0080": "\u00c0",
+        "\u00c3\u0082": "\u00c2",
+        "\u00c3\u0083": "\u00c3",
+        "\u00c3\u0089": "\u00c9",
+        "\u00c3\u0088": "\u00c8",
+        "\u00c3\u008a": "\u00ca",
+        "\u00c3\u008d": "\u00cd",
+        "\u00c3\u008c": "\u00cc",
+        "\u00c3\u0093": "\u00d3",
+        "\u00c3\u0092": "\u00d2",
+        "\u00c3\u0094": "\u00d4",
+        "\u00c3\u0095": "\u00d5",
+        "\u00c3\u009a": "\u00da",
+        "\u00c3\u0099": "\u00d9",
+        "\u00c3\u0087": "\u00c7",
+        "\u00c3\u00a1": "\u00e1",
+        "\u00c3\u00a0": "\u00e0",
+        "\u00c3\u00a2": "\u00e2",
+        "\u00c3\u00a3": "\u00e3",
+        "\u00c3\u00a9": "\u00e9",
+        "\u00c3\u00aa": "\u00ea",
+        "\u00c3\u00ad": "\u00ed",
+        "\u00c3\u00b3": "\u00f3",
+        "\u00c3\u00b5": "\u00f5",
+        "\u00c3\u00ba": "\u00fa",
+        "\u00c3\u00a7": "\u00e7",
+    }
+
+    for errado, certo in trocas.items():
+        t = t.replace(errado, certo)
+
+    return t
+
+
+def _formatar_capitalizacao_morada(texto: str) -> str:
+    artigos = {"DA", "DE", "DO", "DAS", "DOS", "E"}
+    abreviaturas = {"Nº", "NÂº", "ESQ", "DTO", "DIR", "DRT", "CV", "RC", "R/C", "LT"}
+    partes = []
+
+    for token in str(texto).split():
+        token_limpo = token.strip()
+        upper = token_limpo.upper()
+
+        if upper in artigos:
+            partes.append(upper.lower())
+        elif upper in abreviaturas or upper.startswith("Nº") or upper.startswith("NÂº"):
+            partes.append(token_limpo.replace("NÂº", "Nº").replace("NÂ°", "Nº"))
+        elif re.fullmatch(r"\d+(?:[A-Z]|\.[A-Z])?", upper):
+            partes.append(upper)
+        else:
+            partes.append(token_limpo[:1].upper() + token_limpo[1:].lower())
+
+    return " ".join(partes)
+
+
 # =========================
 # PALAVRAS
 # =========================
@@ -405,6 +709,23 @@ PALAVRAS_DESCARTAR = [
     "DATA", "FECHA", "REMITENTE", "AMAZON", "SPAIN", "MADRID",
     "TIPO PORTES", "PAGADO", "REEMBOLSO", "ENVIO",
     "1DE1", "1 DE1", "KGS",
+]
+
+PALAVRAS_CORTE_ETIQUETA = [
+    "C.B", "CB", "CLI", "UL.CLI", "OBS", "REF", "ATT", "PAQ",
+    "PAQ24", "BULTO", "CODIGO", "CÓDIGO", "COD.", "COD",
+    "CODIGO BULTO", "CÓDIGO BULTO", "EXP", "EXPEDICAO",
+    "EXPEDIÇÃO", "REMETENTE", "DESTINATARIO", "DESTINATÁRIO",
+]
+
+PALAVRAS_FORMATO_MORADA = [
+    "RUA", "AVENIDA", "ALAMEDA", "TRAVESSA", "LARGO", "PRAÇA",
+    "PRACA", "PRACETA", "ESTRADA", "CAMINHO", "BECO", "BAIRRO",
+    "QUINTA", "ROTUNDA", "LUGAR", "CASAL", "ZONA", "INDUSTRIAL",
+    "URBANIZACAO", "URBANIZAÇÃO", "LOTE", "BLOCO", "PORTA",
+    "PISO", "ANDAR", "ESQ", "DTO", "FRENTE", "ARMAZEM",
+    "ARMAZÉM", "NACIONAL", "EUROPA", "REPUBLICA", "REPÚBLICA",
+    "TABOEIRA",
 ]
 
 
@@ -516,7 +837,7 @@ def validar_morada_online(morada: str, codigo_postal: str) -> dict:
         resultado["motivo"] = "geocoder_desativado"
         return resultado
 
-    morada = limpar_morada_final(morada)
+    morada = formatar_morada_para_saida(morada)
     codigo_postal = str(codigo_postal).strip()
 
     if not morada or morada == "Não encontrada":
@@ -676,7 +997,7 @@ def limpar_morada_final(morada: str) -> str:
         "RUA", "AVENIDA", "ALAMEDA", "TRAVESSA", "LARGO",
         "PRAÇA", "PRACA", "PRACETA", "ESTRADA", "CAMINHO",
         "BECO", "BAIRRO", "QUINTA", "ROTUNDA", "LUGAR",
-        "CASAL",
+        "CASAL", "ZONA",
     ]
 
     upper = m.upper()
@@ -736,6 +1057,51 @@ def limpar_morada_final(morada: str) -> str:
     m = m.strip(" ,.;:-")
 
     return m
+
+
+def formatar_morada_para_saida(morada: str) -> str:
+    """
+    Limpeza/formatação final genérica para mostrar, confirmar e exportar.
+    A função não cria moradas novas; só trabalha com o texto encontrado/editado.
+    """
+    if morada is None:
+        return ""
+
+    original = str(morada).strip()
+
+    if not original:
+        return ""
+
+    if original.upper() in {"NÃO ENCONTRADA", "NAO ENCONTRADA", "NÃO ENCONTRADO", "NAO ENCONTRADO"}:
+        return "Não encontrada"
+
+    m = original.replace("\r", " ").replace("\n", " ")
+    m = re.sub(r"[|_]+", " ", m)
+    m = re.sub(r"\s+", " ", m).strip()
+
+    m = _remover_lixo_etiqueta_morada(m)
+    m = normalizar_morada_extraida(m)
+    m = _corrigir_tokens_ocr_morada(m)
+    m = _separar_palavras_coladas_morada(m)
+    m = _normalizar_numero_porta_morada(m)
+    m = _remover_lixo_etiqueta_morada(m)
+    m = limpar_morada_final(m)
+    m = _normalizar_numero_porta_morada(m)
+    m = _remover_fragmentos_soltos_saida(m)
+
+    m = re.sub(r"\bN\s*[º°]?\s*(\d{1,5}[A-Z]?)\b", r"Nº \1", m, flags=re.IGNORECASE)
+    m = re.sub(r"\bNR\s*(\d{1,5}[A-Z]?)\b", r"Nº \1", m, flags=re.IGNORECASE)
+    m = re.sub(r"\bN\s+º\s*", "Nº ", m, flags=re.IGNORECASE)
+    m = re.sub(r"\bN[º°]{1,3}\s*", "Nº ", m, flags=re.IGNORECASE)
+    m = re.sub(r"\s*([,.;:])\s*", r"\1 ", m)
+    m = re.sub(r"\b(\d{1,4})\.\s+([A-Z])\b", r"\1.\2", m, flags=re.IGNORECASE)
+    m = re.sub(r"\s+([A-Z])\s*/\s*([A-Z])\b", r" \1/\2", m, flags=re.IGNORECASE)
+    m = re.sub(r"\s+", " ", m).strip(" ,.;:-")
+
+    if not m:
+        return ""
+
+    return _normalizar_mojibake_saida(_formatar_capitalizacao_morada(m))
 
 
 def linha_parece_complemento_morada(linha: str) -> bool:
@@ -995,7 +1361,7 @@ def formatar_morada_pelo_geocoder(morada: str, codigo_postal: str, geo: dict) ->
     if not primeira_parte:
         return morada
 
-    morada_limpa = limpar_morada_final(morada)
+    morada_limpa = formatar_morada_para_saida(morada)
     primeira_parte = normalizar_morada_extraida(primeira_parte)
 
     if linha_tem_via(primeira_parte) and len(primeira_parte) >= 8:
@@ -1011,11 +1377,11 @@ def formatar_morada_pelo_geocoder(morada: str, codigo_postal: str, geo: dict) ->
             primeira_parte = f"{primeira_parte} Nº {numeros[0]}"
 
         if complemento and complemento.upper() != primeira_parte.upper():
-            return morada_limpa
+            return formatar_morada_para_saida(morada_limpa)
 
-        return primeira_parte
+        return formatar_morada_para_saida(primeira_parte)
 
-    return morada_limpa
+    return formatar_morada_para_saida(morada_limpa)
 
 
 # =========================
@@ -1380,6 +1746,7 @@ def extrair_dados_aveiro(texto: str) -> dict:
             continue
 
         morada = encontrar_morada_para_codigo(linhas, cp)
+        morada = formatar_morada_para_saida(morada) if morada else ""
         cidade = corrigir_ocr_para_morada(cp.get("cidade", ""))
         idx = cp["linha_index"]
 
@@ -1440,8 +1807,12 @@ def extrair_dados_aveiro(texto: str) -> dict:
     escolhido = escolher_destinatario(resultados)
 
     if escolhido:
+        for item in resultados:
+            if item.get("morada") and item.get("morada") != "Não encontrada":
+                item["morada"] = formatar_morada_para_saida(item["morada"])
+
         return {
-            "morada": escolhido["morada"],
+            "morada": formatar_morada_para_saida(escolhido["morada"]),
             "codigo_postal": escolhido["codigo_postal"],
             "cidade": escolhido.get("cidade", ""),
             "geo_validada": escolhido.get("geo_validada", False),
@@ -1642,7 +2013,20 @@ def rodar_ocr_em_versoes(versoes: list[str]) -> str:
 # =========================
 
 def salvar_lote_em_arquivos(snapshot=None, excel_path=EXPORT_EXCEL, csv_path=EXPORT_CSV):
-    dados = snapshot if snapshot is not None else list(lote_confirmado)
+    origem = snapshot if snapshot is not None else list(lote_confirmado)
+    dados = []
+
+    for item in origem:
+        item_export = dict(item)
+        item_export["Morada"] = formatar_morada_para_saida(item_export.get("Morada", ""))
+        item_export["Código Postal"] = str(item_export.get("Código Postal", "")).strip()
+
+        if not codigo_postal_valido(item_export["Código Postal"]):
+            raise ValueError(
+                "Código postal incompleto ou inválido. Exporte apenas códigos no formato 3800-XXX ou 3810-XXX."
+            )
+
+        dados.append(item_export)
 
     os.makedirs(os.path.dirname(excel_path), exist_ok=True)
     os.makedirs(os.path.dirname(csv_path), exist_ok=True)
@@ -1823,9 +2207,13 @@ async def upload(file: UploadFile = File(...)):
 
         dados_extraidos = extrair_dados_aveiro(texto)
 
-        morada = dados_extraidos["morada"]
+        morada = formatar_morada_para_saida(dados_extraidos["morada"])
         codigo = dados_extraidos["codigo_postal"]
         cidade = dados_extraidos.get("cidade", "")
+
+        for item in dados_extraidos.get("todos_resultados", []):
+            if item.get("morada") and item.get("morada") != "Não encontrada":
+                item["morada"] = formatar_morada_para_saida(item["morada"])
 
         uploads_pendentes[upload_id] = {
             "morada": morada,
@@ -1883,7 +2271,7 @@ async def upload(file: UploadFile = File(...)):
 @app.post("/confirmar")
 async def confirmar(payload: ConfirmarPayload):
     try:
-        morada = limpar_morada_final(payload.morada)
+        morada = formatar_morada_para_saida(payload.morada)
         codigo = payload.codigo_postal.strip()
         cidade = limpar_linha(corrigir_ocr_para_morada(payload.cidade or ""))
         texto_ocr = payload.texto_ocr or ""
